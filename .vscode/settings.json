@@ -1,0 +1,9 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/home/jerry/Desktop/osx64/target",
+            "binaryPath": "/home/jerry/Desktop/osx64/target/kernel.elf",
+            "binaryArgs": []
+        }
+    ]
+}
