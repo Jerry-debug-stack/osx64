@@ -1,4 +1,13 @@
+#include <stdint.h>
+#include "const.h"
+#include "multiboot.h"
 
-void cstart(){
-    while(1);
+MULTIBOOT_INFO* global_multiboot_info;
+
+void init_mm(MULTIBOOT_INFO* info);
+
+void cstart(MULTIBOOT_INFO* info){
+    global_multiboot_info = easy_phy2linear((uint64_t)info&0xffffffff);
+    init_mm(global_multiboot_info);
+    halt();
 }

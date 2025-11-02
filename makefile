@@ -35,12 +35,7 @@ target/%.o: src/%.c
 $(iso): $(target) 
 	mkdir -p $(grub_dir)
 	cp $(target_elf) target/iso/boot/
-	@echo 'set timeout=0' > $(grub_dir)/grub.cfg
-	@echo 'set default=0' >> $(grub_dir)/grub.cfg
-	@echo 'menuentry "64-bit High-Half Kernel" {' >> $(grub_dir)/grub.cfg
-	@echo '    multiboot /boot/kernel.elf' >> $(grub_dir)/grub.cfg
-	@echo '    boot' >> $(grub_dir)/grub.cfg
-	@echo '}' >> $(grub_dir)/grub.cfg
+	cp grub.cfg $(grub_dir)/grub.cfg
 	grub-mkrescue -o $(iso) target/iso
 
 all: $(target_elf) $(target) $(iso)
@@ -48,9 +43,9 @@ clean:
 	rm -rf target
 	mkdir target
 run:$(target_elf) $(target) $(iso)
-	qemu-system-x86_64 -cdrom $(iso) -smp 2 -m 4096
+	qemu-system-x86_64 -cdrom $(iso) -smp 2 -m 4096 -vga std
 test:$(target_elf) $(target) $(iso)
-	qemu-system-x86_64 -cdrom $(iso) -s -S -smp 2 -m 4096
+	qemu-system-x86_64 -cdrom $(iso) -s -S -smp 2 -m 4096 -vga std
 
 .PHONY: run all clean test
 

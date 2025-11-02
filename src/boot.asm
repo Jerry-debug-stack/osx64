@@ -1,9 +1,10 @@
-; 常量定义
-MBALIGN  equ  1<<1              ; 对齐加载的模块
-MEMINFO  equ  1<<1              ; 提供内存映射
-FLAGS    equ  MBALIGN | MEMINFO ; Multiboot标志字段
+FLAGS    equ  0x7 ; Multiboot标志字段
 MAGIC    equ  0x1BADB002        ; Multiboot魔数
 CHECKSUM equ -(MAGIC + FLAGS)   ; 校验和
+
+PAGE_ITEM_SMALL equ PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE;
+PAGE_ITEM       equ PAGE_ITEM_SMALL|PAGE_BIG_ENTRY
+
 %include "pm.inc"
 
 global _start
@@ -14,17 +15,25 @@ align 4
     dd MAGIC
     dd FLAGS
     dd CHECKSUM
-
+    header_addr: dd 0
+    load_addr: dd 0
+    load_end_addr: dd 0
+    bss_end_addr: dd 0
+    entry_addr:dd 0
+    mode_type:dd 0
+    width:dd 1280
+    height: dd 800
+    depth:dd 32
 section .text32
 bits 32
 _start:
-;过程中不能改变rbx
-    ;cmp eax,0x628936d7
-    ;jne .error
+    cmp eax,0x2badb002
+    jne .error
     mov esp,stack_top
+    mov dword[multiboot_info],ebx
     call test_long_mode
 .set_page_table:
-    mov ecx,PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE;|PAGE_SYSTEM_MODE
+    mov ecx,PAGE_ITEM_SMALL
     mov eax,ecx
     or eax,ptable3_0
     mov dword[ptable4],eax
@@ -92,44 +101,17 @@ section .data
     align 4096
     ptable3_1:times 1024 dd 0
     align 4096
-    ptable2_0:
-        dd 0x0|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
+    ptable2_0:        
+        dd 0x0|PAGE_ITEM
         times 1023 dd 0
     align 4096
     ptable2_1:
-        dd 0x0|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x200000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x400000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x600000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x800000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0xa00000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0xc00000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0xe00000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1000000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1200000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1400000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1600000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1800000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1a00000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1c00000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        dd 0x1e00000|PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE|PAGE_BIG_ENTRY;|PAGE_SYSTEM_MODE
-        dd 0
-        times 1024-32 dd 0
+        %assign addr 0x0
+        %rep 256
+            dd addr|PAGE_ITEM, 0
+            %assign addr addr + 0x200000
+        %endrep
+        times 512 dd 0
     multiboot_info: dd 0,0
     ALIGN 32
     ;64bitGDT等
@@ -148,11 +130,11 @@ section .text64high
 bits 64
     long_mode_high:
         mov rsp,kernel_stack_top
-        mov rdi,rbx
+        mov rdi,qword[abs multiboot_info]
         call cstart
         jmp $
 
-section .kernel.bss
+section .kernel.bss nobits alloc
     align 16
     kernel_stack_bottom:
         resb 4096 ;栈空间

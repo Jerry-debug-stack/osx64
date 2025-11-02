@@ -38,6 +38,11 @@ SECTIONS
         *(.rodata.*)
         *(.eh_frame)      /* 将.eh_frame放在rodata_k中 */
     }
+    . = ALIGN(1M);
+    .mrt (NOLOAD) : {
+        *(.mrt) /* mrt表 */
+    }
+
     .debug_info 0 : { *(.debug_info) }
     .debug_abbrev 0 : { *(.debug_abbrev) }
     .debug_line 0 : { *(.debug_line) }

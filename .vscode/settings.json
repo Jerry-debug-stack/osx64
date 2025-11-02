@@ -5,5 +5,10 @@
             "binaryPath": "/home/jerry/Desktop/osx64/target/kernel.elf",
             "binaryArgs": []
         }
-    ]
+    ],
+    "files.associations": {
+        "const.h": "c",
+        "multiboot.h": "c",
+        "stdint.h": "c"
+    }
 }

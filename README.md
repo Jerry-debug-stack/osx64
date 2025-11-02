@@ -16,11 +16,24 @@
     - [x] 开始使用C语言
       - [x] 重写linker.ld,让我们的其余内核程序加载到高地址
       - [x] 从低地址跳转到高地址再跳转到内核
-- [ ] Chapter&nbsp;$\ln e^2$:&emsp;VGA简单显示初步
 - [ ] 内存管理
+    - [x] 获取multiboot信息表
+      - [x] 构建物理区域内存池
     - [ ] 按页分配内存
+      - [x] 引用计数的设计
+      - [x] physic_page_alloc decreasze_reference_page_4k add_reference_4k
+      - [ ] alloc free物理连续的内存页
+    - [ ] 页表
+      - [ ] 创建页表中的一个4k页
+      - [ ] 回收页表中的一个4k页
+      - [ ] 创建页表中的一个2M页(这玩意只有内核映射会用到，且不用返还内存)
+      - [ ] 地址空间的划分
     - [ ] arena分配器
+      - [ ] 初始化arena区域
     - [ ] 堆分配器
+- [ ] Chapter&nbsp;$\ln e^2$:&emsp;VGA简单显示初步
+    - [x] 获取VGA信息
+    - [ ] 简单的清屏幕，输出，定位，换行，换页的处理
 - [ ] 保护模式高级
     - [ ] 重建GDT IDT
 - [ ] APIC中断控制器与IOAPIC
