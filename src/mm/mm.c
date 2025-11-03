@@ -1,7 +1,6 @@
-#include <stdint.h>
-#include "const.h"
-#include "multiboot.h"
 #include "mm/page_pool.h"
+#include "multiboot.h"
+#include "mm/mm.h"
 #include "lib/string.h"
 
 /// @brief memory reference table：定义在加载部分的尾部
@@ -9,35 +8,22 @@ uint8_t mrt[1] __attribute__((section(".mrt")));
 
 PHYSIC_AREA_ITEM pais[DEFAULT_PAI_NUMBER];
 
-struct 
-{
-    /// @brief Highest Physical Address
-    uint64_t hpa;
-    /// @brief Total Number of Physical Pages
-    uint64_t tpp;
-    /// @brief Total Number of Free Physical Pages
-    uint64_t tfpp;
-    uint32_t npai;
-}mm;
+MM_MANAGER mm;
 
 void flush_tlb(void);
 void invlpg_tlb(uint64_t addr);
-void put_page_4k(uint64_t phy_addr,uint64_t vir_addr,uint64_t ptable_vir,uint8_t type);
-void rm_page_4k(uint64_t vir_addr,uint64_t ptable_vir);
-void put_page_2M(uint64_t phy_addr,uint64_t vir_addr,uint64_t ptable_vir);
-
-uint64_t alloc_page_4k(void);
-uint8_t decrease_reference_page_4k(uint64_t addr);
-uint8_t add_reference_page_4k(uint64_t addr);
 
 void get_total_memory(MULTIBOOT_INFO* info);
 void set_mrt_table(void);
 void set_kernel_area(void);
 
+extern void init_slab(void);
+
 void init_mm(MULTIBOOT_INFO* info){
     get_total_memory(info);
     set_mrt_table();
     set_kernel_area();
+    init_slab();
 }
 
 void get_total_memory(MULTIBOOT_INFO* info){
@@ -234,9 +220,9 @@ void put_page_4k(uint64_t phy_addr,uint64_t vir_addr,uint64_t ptable_vir,uint8_t
             ptable = easy_phy2linear(ptable[layer[i]] & 0xfffffffffffff000);
         }else{
             uint64_t temp = alloc_page_4k();
-            memset((void*)temp,0,4096);
             ptable[layer[i]] = temp | dir_type;
             ptable = easy_phy2linear(temp);
+            memset((void*)ptable,0,4096);
         }
     }
     if(ptable[layer[3]] & PAGE_PRESENT){ halt(); }

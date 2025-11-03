@@ -24,6 +24,27 @@ typedef struct PhysicAreaItem
     uint64_t nfpa;
 } PHYSIC_AREA_ITEM;
 
+#include "mm/slab.h"
+
+typedef struct MmManager
+{
+    /// @brief Highest Physical Address
+    uint64_t hpa;
+    /// @brief Total Number of Physical Pages
+    uint64_t tpp;
+    /// @brief Total Number of Free Physical Pages
+    uint64_t tfpp;
+    uint32_t npai;
+    /// @brief Slab End ID
+    uint64_t slabei[7];
+    /// @brief Next free Slab ID
+    uint64_t nfslabi[7];
+    /// @brief Medium Slab pointers
+    struct SlabMiddle* mslab[2];
+    /// @brief Next Free Medium Slab pointers
+    struct SlabMiddle* mnfslab[2];
+}MM_MANAGER;
+
 #define DEFAULT_PAI_NUMBER              128
 
 #define PAGE_ENTRY_NUMBER               (0x1000 / 8)

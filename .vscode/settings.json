@@ -9,6 +9,10 @@
     "files.associations": {
         "const.h": "c",
         "multiboot.h": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "compare": "cpp",
+        "cstdint": "cpp",
+        "format": "cpp",
+        "page_pool.h": "c"
     }
 }
