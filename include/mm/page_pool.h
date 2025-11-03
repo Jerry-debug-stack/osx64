@@ -1,10 +1,16 @@
 #ifndef OS_PAGE_POOL_H
 #define OS_PAGE_POOL_H
+
 #include <stdint.h>
+#include "const.h"
 
 ///@brief maximum memory of 1024G=1T
 #define MAX_MEM_SUPPORTED               1024UL*1024UL*1024UL*1024UL
 #define ADDRESS_SPACE_GAP               MAX_MEM_SUPPORTED
+
+/// 我们假定arena的单个区域不会超过512G也就是一个Buffer
+#define NUMBER_OF_ARENA                 10
+#define ARENA_START_ID_IN_PML4          (256 + 2)
 
 typedef struct PhysicAreaItem
 {
@@ -30,7 +36,7 @@ typedef struct PhysicAreaItem
 #define TABLE_LEVEL_1_SIZE              0x8000000000
 #define TABLE_LEVEL_1_BITS              39
 
-#define PAGE_USED                       1
+#define PAGE_PRESENT                    1
 #define PAGE_WRITABLE                   ((uint64_t)1 << 1)
 #define PAGE_USER_MODE                  ((uint64_t)1 << 2)
 #define PAGE_SYSTEM_MODE                ((uint64_t)0 << 2)
@@ -42,5 +48,14 @@ typedef struct PhysicAreaItem
 #define PAGE_BIG_ENTRY                  ((uint64_t)1 << 7)
 #define PAGE_GLOBAL                     ((uint64_t)1 << 8)
 #define PAGE_FULL                       ((uint64_t)1 << 9)
+
+#define PAGE_KERNEL_4K                  (PAGE_PRESENT|PAGE_WRITABLE|PAGE_SYSTEM_MODE|PAGE_LEVEL_CACHE_ENABLE|PAGE_GLOBAL)
+#define PAGE_KERNEL_DIR                 PAGE_KERNEL_4K
+#define PAGE_KERNEL_2M                  (PAGE_PRESENT|PAGE_WRITABLE|PAGE_SYSTEM_MODE|PAGE_LEVEL_CACHE_ENABLE|PAGE_GLOBAL|PAGE_BIG_ENTRY)
+#define PAGE_USER_4K                    (PAGE_PRESENT|PAGE_WRITABLE|PAGE_USER_MODE|PAGE_LEVEL_CACHE_ENABLE)
+#define PAGE_USER_DIR                   PAGE_USER_4K
+#define PAGE_USER_4K_COPY_ON_WRITE      (PAGE_PRESENT|PAGE_USER_MODE|PAGE_LEVEL_CACHE_ENABLE)
+
+extern uint64_t ptable4[512];
 
 #endif

@@ -2,12 +2,13 @@ FLAGS    equ  0x7 ; Multiboot标志字段
 MAGIC    equ  0x1BADB002        ; Multiboot魔数
 CHECKSUM equ -(MAGIC + FLAGS)   ; 校验和
 
-PAGE_ITEM_SMALL equ PAGE_USED|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE;
+PAGE_ITEM_SMALL equ PAGE_PRESENT|PAGE_WRITABLE|PAGE_WRITE_THROUGH|PAGE_LEVEL_CACHE_ENABLE;
 PAGE_ITEM       equ PAGE_ITEM_SMALL|PAGE_BIG_ENTRY
 
 %include "pm.inc"
 
 global _start
+global ptable4
 extern cstart
 
 section .multiboot
