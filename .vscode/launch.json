@@ -19,8 +19,7 @@
                     "ignoreFailures": true
                 }
             ],
-            //"preLaunchTask": "startQEMUtest",  // 需要配合 tasks.json 使用
-            //"postDebugTask": "stopQEMU"
+            "preLaunchTask": "MakeTest",  // 需要配合 tasks.json 使用
         }
     ]
 }

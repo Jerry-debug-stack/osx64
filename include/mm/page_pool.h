@@ -46,12 +46,16 @@ typedef struct MmManager {
     uint32_t npai;
     /// @brief Slab End ID
     uint64_t slabei[7];
+
     /// @brief Next free Slab ID
     uint64_t nfslabi[7];
+    
     /// @brief Medium Slab pointers
     struct SlabMiddle* mslab[2];
+    
     /// @brief Next Free Medium Slab pointers
     struct SlabMiddle* mnfslab[2];
+    
     /// @brief start heap pointer
     struct Heap* shp;
     /// @brief next free heap pointer

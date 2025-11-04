@@ -1,0 +1,19 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "MakeTest",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-c",
+                "make clean;make all;bash .vscode/test.bash"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+        }
+    ]
+}
