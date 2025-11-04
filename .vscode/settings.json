@@ -13,6 +13,7 @@
         "compare": "cpp",
         "cstdint": "cpp",
         "format": "cpp",
-        "page_pool.h": "c"
+        "page_pool.h": "c",
+        "slab.h": "c"
     }
 }
