@@ -23,7 +23,7 @@ align 4
     entry_addr:dd 0
     mode_type:dd 0
     width:dd 1280
-    height: dd 800
+    height: dd 720
     depth:dd 32
 section .text32
 bits 32

@@ -14,6 +14,7 @@
         "cstdint": "cpp",
         "format": "cpp",
         "page_pool.h": "c",
-        "slab.h": "c"
+        "slab.h": "c",
+        "stdint-gcc.h": "c"
     }
 }

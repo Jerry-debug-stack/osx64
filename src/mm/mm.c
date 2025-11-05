@@ -10,12 +10,12 @@ PHYSIC_AREA_ITEM pais[DEFAULT_PAI_NUMBER];
 
 MM_MANAGER mm;
 
-void flush_tlb(void);
-void invlpg_tlb(uint64_t addr);
+static void flush_tlb(void);
+static void invlpg_tlb(uint64_t addr);
 
-void get_total_memory(MULTIBOOT_INFO* info);
-void set_mrt_table(void);
-void set_kernel_area(void);
+static void get_total_memory(MULTIBOOT_INFO* info);
+static void set_mrt_table(void);
+static void set_kernel_area(void);
 
 extern void init_slab(void);
 extern void init_heap();
@@ -29,7 +29,7 @@ void init_mm(MULTIBOOT_INFO* info)
     init_heap();
 }
 
-void get_total_memory(MULTIBOOT_INFO* info)
+static void get_total_memory(MULTIBOOT_INFO* info)
 {
     if (!(info->flags & MULTIBOOT_INFO_MEM_MAP))
         halt();
@@ -55,7 +55,7 @@ void get_total_memory(MULTIBOOT_INFO* info)
     mm.tpp = (mm.hpa + 0xfff) >> 12;
 }
 
-void set_mrt_table(void)
+static void set_mrt_table(void)
 {
     uint64_t addr = ((uint64_t)easy_linear2phy(mrt) + mm.tpp + 0xfff) & 0xfffffffffffff000;
     memset(mrt, (uint8_t)0xff, (addr >> 12));
@@ -77,11 +77,7 @@ void set_mrt_table(void)
     }
 }
 
-void set_default_page_table(void)
-{
-}
-
-void set_kernel_area(void)
+static void set_kernel_area(void)
 {
     uint64_t max = (mm.hpa + 0x1fffff) >> TABLE_LEVEL_3_BITS;
     for (uint64_t i = 0; i < max; i++) {
@@ -306,12 +302,12 @@ void put_page_2M(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir)
     invlpg_tlb(vir_addr);
 }
 
-inline void flush_tlb(void)
+static inline void flush_tlb(void)
 {
     __asm__ __volatile__("movq %%cr3,%%rax;movq %%rax,%%cr3;" ::: "rax");
 }
 
-inline void invlpg_tlb(uint64_t addr)
+static inline void invlpg_tlb(uint64_t addr)
 {
     __asm__ __volatile__("invlpg (%0);" ::"r"(addr) : "memory");
 }
