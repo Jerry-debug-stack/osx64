@@ -1,7 +1,10 @@
 #ifndef OS_VIEW_H
 #define OS_VIEW_H
 
+#include <stdint.h>
+
 void low_print(char* str,uint32_t color_back,uint32_t color_fore);
+uint32_t low_printf(const char* fmt,uint32_t color_back,uint32_t color_fore,...);
 
 #define VIEW_COLOR_WHITE 0xffffffff
 #define VIEW_COLOR_RED 0x00ff0000
