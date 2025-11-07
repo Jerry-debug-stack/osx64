@@ -12,8 +12,8 @@
         __asm__ __volatile__("cli;hlt"); \
     } while (1);
 
-#define SELECTOR_KERNEL_CS      (0x1<<3)
-#define SELECTOR_KERNEL_DS      (0x2<<3)
+#define SELECTOR_KERNEL_CS (0x1 << 3)
+#define SELECTOR_KERNEL_DS (0x2 << 3)
 
 #define SYSCALL_INTERRUPT_VECTOR 0x80
 #define KERNEL_SCHEDULE_VECTOR 0x81

@@ -3,9 +3,8 @@
 
 #include <stdint.h>
 
-typedef struct CPUCore
-{
-    
+typedef struct CPUCore {
+
 } CPU_CORE;
 
 /* Gate type */
@@ -51,7 +50,7 @@ typedef struct tss {
     unsigned int ist7_low, int7_high;
     unsigned int reserved2_low, reserved2_high;
     unsigned int reserved3_low, reserved3_high, ioMAP;
-} __attribute__((packed))TSS;
+} __attribute__((packed)) TSS;
 
 // Access Byte
 #define ACCESS_PRESENT 1 << 15
@@ -84,6 +83,5 @@ typedef struct tss {
 #define PAGEFAULT_USER (1 << 2)
 #define PAGEFAULT_RSVD (1 << 3)
 #define PAGEFAULT_INSTRUCTION (1 << 4)
-
 
 #endif
