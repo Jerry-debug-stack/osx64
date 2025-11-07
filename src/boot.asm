@@ -9,7 +9,12 @@ PAGE_ITEM       equ PAGE_ITEM_SMALL|PAGE_BIG_ENTRY
 
 global _start
 global ptable4
-extern cstart
+global load_protect
+global Debug,Nmi,Int3,Overflow,Bounds,UndefinedOpcode,DevNotAvailable,DoubleFault,CoprocessorSegmentOverRun
+global DoubleFault,CoprocessorSegmentOverRun,InvalidTSS,SegmentNotPresent,GeneralProtection,PageFault,x87FPUError
+global AlignmentCheck,MachineCheck,SIMDException,VirtualizationException,StackSegmentFault,Divide_Error
+
+extern cstart,exception_handler
 
 section .multiboot
 align 4
@@ -134,6 +139,211 @@ bits 64
         mov rdi,qword[abs multiboot_info]
         call cstart
         jmp $
+
+%macro irq_err_save 0
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rdi
+    push rsi
+
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rbx,es
+    push rbx
+    mov rbx,ds
+    push rbx
+
+    mov rbx,0x10
+    mov es,rbx
+    mov ds,rbx
+%endmacro
+
+%macro go_out 0
+    pop rbx
+    mov ds,rbx
+    pop rbx
+    mov es,rbx
+    
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rsi
+    pop rdi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    cli
+    iretq
+%endmacro
+
+%macro intr 1
+    irq_err_save
+    ;call [rel intr_handler + %1 * 8]
+    go_out
+%endmacro
+
+align 16
+Divide_Error:
+    push -1
+    push 0
+    irq_err_save
+    jmp handler
+align 16
+Debug:
+    push -1
+    push 1
+    irq_err_save
+    jmp handler
+align 16
+Nmi:
+    push -1
+    push 2
+    irq_err_save
+    jmp handler
+align 16
+Int3:
+    push -1
+    push 3
+    irq_err_save
+    jmp handler
+align 16
+Overflow:
+    push -1
+    push 4
+    irq_err_save
+    jmp handler
+align 16
+Bounds:
+    push -1
+    push 5
+    irq_err_save
+    jmp handler
+align 16
+UndefinedOpcode:
+    push -1
+    push 6
+    irq_err_save
+    jmp handler
+align 16
+DevNotAvailable:
+    push -1
+    push 7
+    irq_err_save
+    jmp handler
+align 16
+DoubleFault:
+    push -1
+    push 8
+    irq_err_save
+    jmp handler
+align 16
+CoprocessorSegmentOverRun:
+    push -1
+    push 9
+    irq_err_save
+    jmp handler
+align 16
+InvalidTSS:
+    push 10
+    irq_err_save
+    jmp handler
+align 16
+SegmentNotPresent:
+    push 11
+    irq_err_save
+    jmp handler
+align 16
+StackSegmentFault:
+    push 12
+    irq_err_save
+    jmp handler
+align 16
+GeneralProtection:
+    push 13
+    irq_err_save
+    jmp handler
+align 16
+PageFault:
+    push 14
+    irq_err_save
+    jmp handler
+align 16
+x87FPUError:
+    push -1
+    push 16
+    irq_err_save
+    jmp handler
+align 16
+AlignmentCheck:
+    push -1
+    push 17
+    irq_err_save
+    jmp handler
+align 16
+MachineCheck:
+    push -1
+    push 18
+    irq_err_save
+    jmp handler
+align 16
+SIMDException:
+    push -1
+    push 19
+    irq_err_save
+    jmp handler
+align 16
+VirtualizationException:
+    push -1
+    push 20
+    irq_err_save
+    jmp handler
+handler:
+    call exception_handler
+    pop rax
+    mov ds,rax
+    pop rax
+    mov es,rax
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rsi
+    pop rdi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp,16
+    iretq
+
+load_protect:
+    lgdt [rdi]
+    lidt [rsi]
+    mov ax,(5<<3)|0
+    ltr ax
+    ret
 
 section .kernel.bss nobits alloc
     align 16
