@@ -200,7 +200,4 @@ typedef struct IoAPIC {
     uint64_t BspApicId;
 } IO_APIC;
 
-void write_io_apic(uint64_t Register, uint64_t Data);
-uint64_t read_io_apic(uint64_t Register);
-
 #endif

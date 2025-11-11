@@ -79,7 +79,6 @@ void init_protect(void)
     ((TSS*)tss)->ist1_low = (uint32_t)((uint64_t)easy_phy2linear(phy_addr) & 0xffffffff);
     ((TSS*)tss)->ist1_high = (uint32_t)((uint64_t)easy_phy2linear(phy_addr) >> 32);
     load_protect(gdt_ptr, idt_ptr);
-    __asm__ __volatile__("ud2");
 }
 
 void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_t ist, uint64_t dpl, uint64_t type)
