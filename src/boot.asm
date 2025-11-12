@@ -13,8 +13,11 @@ global load_protect
 global Debug,Nmi,Int3,Overflow,Bounds,UndefinedOpcode,DevNotAvailable,DoubleFault,CoprocessorSegmentOverRun
 global DoubleFault,CoprocessorSegmentOverRun,InvalidTSS,SegmentNotPresent,GeneralProtection,PageFault,x87FPUError
 global AlignmentCheck,MachineCheck,SIMDException,VirtualizationException,StackSegmentFault,Divide_Error
+global intr0,intr1,intr2,intr3,intr4,intr5,intr6,intr7,intr8,intr9,intr10,intr11,intr12,intr13,intr14,intr15,intr16,intr17,intr18,intr19,intr20,intr21,intr22,intr23
+global intr2_bsp
 
 extern cstart,exception_handler
+extern intr_handler,timer_intr_soft_bsp
 
 section .multiboot
 align 4
@@ -337,6 +340,91 @@ handler:
     pop rax
     add rsp,16
     iretq
+
+%macro save 0
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rdi
+    push rsi
+
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rbx,es
+    push rbx
+    mov rbx,ds
+    push rbx
+
+    mov rbx,0x10
+    mov es,rbx
+    mov ds,rbx
+    sti
+%endmacro 
+
+
+ALIGN 16
+intr0 :intr 0
+ALIGN 16
+intr1 :intr 1
+ALIGN 16
+intr2 :intr 2
+ALIGN 16
+intr3 :intr 3
+ALIGN 16
+intr4 :intr 4
+ALIGN 16
+intr5 :intr 5
+ALIGN 16
+intr6 :intr 6
+ALIGN 16
+intr7 :intr 7
+ALIGN 16
+intr8 :intr 8
+ALIGN 16
+intr9 :intr 9
+ALIGN 16
+intr10:intr 10
+ALIGN 16
+intr11:intr 11
+ALIGN 16
+intr12:intr 12
+ALIGN 16
+intr13:intr 13
+ALIGN 16
+intr14:intr 14
+ALIGN 16
+intr15:intr 15
+ALIGN 16
+intr16:intr 16
+ALIGN 16
+intr17:intr 17
+ALIGN 16
+intr18:intr 18
+ALIGN 16
+intr19:intr 19
+ALIGN 16
+intr20:intr 20
+ALIGN 16
+intr21:intr 21
+ALIGN 16
+intr22:intr 22
+ALIGN 16
+intr23:intr 23
+ALIGN 16
+intr2_bsp :
+    save
+    cli
+    call timer_intr_soft_bsp
+    go_out
 
 load_protect:
     lgdt [rdi]

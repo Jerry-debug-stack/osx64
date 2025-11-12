@@ -27,6 +27,32 @@ void MachineCheck(void);
 void SIMDException(void);
 void VirtualizationException(void);
 
+void intr0(void);
+void intr1(void);
+void intr2(void);
+void intr2_bsp(void);
+void intr3(void);
+void intr4(void);
+void intr5(void);
+void intr6(void);
+void intr7(void);
+void intr8(void);
+void intr9(void);
+void intr10(void);
+void intr11(void);
+void intr12(void);
+void intr13(void);
+void intr14(void);
+void intr15(void);
+void intr16(void);
+void intr17(void);
+void intr18(void);
+void intr19(void);
+void intr20(void);
+void intr21(void);
+void intr22(void);
+void intr23(void);
+
 void load_protect(uint32_t* gdt_ptr, uint32_t* idt_ptr);
 
 void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_t ist, uint64_t dpl, uint64_t type);
@@ -74,6 +100,31 @@ void init_protect(void)
     make_idt_descriptor(idt_table, 18, (uint64_t)MachineCheck, 1, 3, IDT_INTERRUPT_GATE);
     make_idt_descriptor(idt_table, 19, (uint64_t)SIMDException, 0, 3, IDT_INTERRUPT_GATE);
     make_idt_descriptor(idt_table, 20, (uint64_t)VirtualizationException, 0, 3, IDT_INTERRUPT_GATE);
+
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_8259A_MASTER, (unsigned long)intr0, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_KEYBOARD, (unsigned long)intr1, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_TIMER, (unsigned long)intr2_bsp, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_SERIAL_2_4, (unsigned long)intr3, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_SERIAL_1_3, (unsigned long)intr4, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PARALLEL_2, (unsigned long)intr5, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_CDROM, (unsigned long)intr6, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PARALLEL_1, (unsigned long)intr7, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_RTC_HPET_1, (unsigned long)intr8, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_9, (unsigned long)intr9, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_10, (unsigned long)intr10, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_HPET_2, (unsigned long)intr11, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_HPET_3_MOUSE_PS2, (unsigned long)intr12, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_FERR_DMA, (unsigned long)intr13, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_MASTER_SATA, (unsigned long)intr14, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_SLAVE_SATA, (unsigned long)intr15, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQA, (unsigned long)intr16, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQB, (unsigned long)intr17, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQC, (unsigned long)intr18, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQD, (unsigned long)intr19, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQE, (unsigned long)intr20, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQF, (unsigned long)intr21, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQG, (unsigned long)intr22, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, INTERRUPT_VECTOR_PIRQH, (unsigned long)intr23, 0, 3, IDT_INTERRUPT_GATE);
 
     uint64_t* phy_addr = (uint64_t*)(alloc_page_4k() + 0x1000);
     ((TSS*)tss)->ist1_low = (uint32_t)((uint64_t)easy_phy2linear(phy_addr) & 0xffffffff);

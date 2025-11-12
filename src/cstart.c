@@ -9,6 +9,7 @@ void init_mm(MULTIBOOT_INFO* info);
 void init_view(MULTIBOOT_INFO* info);
 void init_protect(void);
 void init_apic(void);
+void init_time(void);
 
 void cstart(MULTIBOOT_INFO* info)
 {
@@ -18,5 +19,8 @@ void cstart(MULTIBOOT_INFO* info)
     init_protect();
     init_apic();
     low_print("[SYSTEM]apic ready",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    init_time();
+    __asm__ __volatile__("sti");
+    while(1);
     halt();
 }
