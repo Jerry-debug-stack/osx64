@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #define VIRTUAL_ADDR_0 0xffff800000000000
+#define PHYSIC_ADDR_AP_CODE_DATA       0x10000
 
 #define easy_phy2linear(addr) (void*)((uint64_t)(addr) + VIRTUAL_ADDR_0)
 #define easy_linear2phy(addr) (void*)((uint64_t)(addr) - VIRTUAL_ADDR_0)
@@ -23,5 +24,7 @@
 #else
 #define UNUSED
 #endif
+
+#define MAX_CPU_NUM                     32
 
 #endif

@@ -128,13 +128,14 @@ uint32_t get_apic_id()
     return (LocalAPIC[LocalAPICId] >> 24); /// 这是APIC
 }
 
-/// @brief 向其他处理器发送IPI信息
-/// @param InterruptVector 中断向量号
-static void broadcast_ipi_no_self(uint8_t InterruptVector)
-{
-    LocalAPIC[ICRbit63to32] = 0;
-    LocalAPIC[ICRbit31to0] = (0x3 << 18) | (0x1 << 14) | InterruptVector;
-}
+///// @brief 向其他处理器发送IPI信息
+///// @param InterruptVector 中断向量号
+//static void broadcast_ipi_no_self(uint8_t InterruptVector)
+//{
+//    LocalAPIC[ICRbit63to32] = 0;
+//    LocalAPIC[ICRbit31to0] = (0x3 << 18) | (0x1 << 14) | InterruptVector;
+//}
+//
 
 /// @brief 向其他处理器发送IPI INIT信息
 static void broadcast_ipi_init(void)
@@ -146,5 +147,17 @@ static void broadcast_ipi_init(void)
 /// @param StartUpPhyAddr 地址，需要是0xmn000的形式，这时0xmn为interruptvector
 static void broadcast_ipi_startup(void)
 {
-    //LocalAPIC[ICRbit31to0] = 0xc4600 | (PHYSIC_ADDR_AP_START >> 12);
+    LocalAPIC[ICRbit31to0] = 0xc4600 | (PHYSIC_ADDR_AP_CODE_DATA >> 12);
 }
+
+extern uint8_t ap_code_data_start[];
+void init_ap(void){
+    memcpy(easy_phy2linear(PHYSIC_ADDR_AP_CODE_DATA),ap_code_data_start,512);
+    broadcast_ipi_init();
+    for (uint32_t i = 0; i < 100000; i++)
+    {
+        __asm__ __volatile__("nop");
+    }
+    broadcast_ipi_startup();
+}
+

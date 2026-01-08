@@ -31,7 +31,7 @@ void init_view(MULTIBOOT_INFO* info)
     vMm.disp_c_y = 0;
 }
 
-static void copy_creen(uint32_t** buffer)
+UNUSED static void copy_creen(uint32_t** buffer)
 {
     for (uint32_t i = 0; i < MAX_ROWS; i++) {
         memcpy(vMm.vbuffer + i * ROW_SIZE_BYTES, buffer[i], ROW_SIZE_BYTES);

@@ -2,6 +2,7 @@ ENTRY(_start)
 
 VIRTUAL_BASE        = 0xffff800000110000;
 VIRTUAL_ADDR_0      = 0xffff800000000000;
+AP_ADDR             = 0x10000;
 
 SECTIONS
 {
@@ -18,6 +19,13 @@ SECTIONS
     }
     .data : ALIGN(4K){
         target/boot.o(.data)
+    }
+    .ap_code : {
+        ap_code_data_start = .;
+        target/boot.o(.apboot16)
+    }
+    .apdata : ALIGN(32){
+        target/boot.o(.apdata)
     }
     . = VIRTUAL_BASE;
     .bit64enter : AT(ADDR(.bit64enter) - VIRTUAL_ADDR_0){
