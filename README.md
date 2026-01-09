@@ -44,7 +44,7 @@
     - [x] 重建GDT
     - [x] 中断与异常处理程序
     - [x] 重建IDT
-- [ ] APIC中断控制器与IOAPIC
+- [x] APIC中断控制器与IOAPIC
     - [x] PCI总线初步(只是为了获取APIC寄存器地址)
     - [x] Local APIC
     - [x] IOAPIC
