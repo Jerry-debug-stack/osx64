@@ -43,9 +43,9 @@ clean:
 	rm -rf target
 	mkdir target
 run:$(target_elf) $(target) $(iso)
-	qemu-system-x86_64 -cdrom $(iso) -smp 2 -m 4096 -vga std
+	qemu-system-x86_64 -cdrom $(iso) -smp 4 -m 4096 -vga std
 test:$(target_elf) $(target) $(iso)
-	qemu-system-x86_64 -cdrom $(iso) -s -S -smp 2 -m 4096 -vga std
+	qemu-system-x86_64 -cdrom $(iso) -s -S -smp 4 -m 4096 -vga std
 
 .PHONY: run all clean test
 

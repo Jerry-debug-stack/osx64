@@ -149,7 +149,6 @@ static void alloc_logic_cpu_id(void) {
     }
 }
 
-uint32_t get_apic_id();
 uint32_t get_logic_cpu_id(void){
     uint32_t apic_id = get_apic_id();
     for (uint32_t i = 0; i < cpus->total_num; i++)

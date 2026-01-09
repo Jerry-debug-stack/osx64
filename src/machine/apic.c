@@ -5,15 +5,13 @@
 #include "protect.h"
 #include "lib/string.h"
 #include "view/view.h"
+#include "machine/cpu.h"
+extern GLOBAL_CPU *cpus;
 
 uint32_t* LocalAPIC;
-
 IO_APIC IoAPIC;
 
 void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_t ist, uint64_t dpl, uint64_t type);
-
-void init_local_apic();
-
 void default_intr_soft(void);
 
 void disable_irq(uint16_t irq);
@@ -24,32 +22,11 @@ static uint64_t read_io_apic(uint64_t Register);
 
 uint64_t intr_handler[24];
 
-/// @brief 初始化APIC
-void init_apic()
-{
+void init_apic_ap(){
     LocalAPIC = (uint32_t*)easy_phy2linear(PHYSIC_ADDR_LOCAL_APIC);
     uint32_t a, b, c, d;
     /* Local APIC */
     __asm__ __volatile__("cpuid;" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "0"(0), "2"(1));
-    init_local_apic();
-    /* I/O APIC */
-    IoAPIC.RegisterSelect = (uint8_t*)easy_phy2linear(IO_REGISTER_SELECT);
-    IoAPIC.Data = (uint32_t*)easy_phy2linear(IO_WINDOW);
-    IoAPIC.BspApicId = (uint64_t)LocalAPIC[LocalAPICId] >> 24;
-    IoAPIC.IoEOI = (uint32_t*)easy_phy2linear(IO_EOI_REGISTER);
-    uint64_t chip_configuation = (uint64_t)easy_phy2linear(read_pcie(MAKE_PCIE_ADDR(0, 31, 0, 0xf0)) & 0xfffffc000);
-    /* OIC寄存器开启IO APIC */
-    *((uint32_t*)(chip_configuation + 0x31fe)) = 1 << 8;
-    IoAPIC.RTENumber = (read_io_apic(IO_APIC_VERSION) >> 16) + 1;
-    for (uint64_t i = 0; i < IoAPIC.RTENumber; i++) {
-        write_io_apic(IO_APIC_REDIRECTION_TABLE_HIGH(i), IoAPIC.BspApicId << 24);
-        write_io_apic(IO_APIC_REDIRECTION_TABLE_LOW(i), LVT_MASKED | (0x20 + i));
-        intr_handler[i] = (uint64_t)default_intr_soft;
-    }
-}
-
-void init_local_apic()
-{
     __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x22), "al"(0x70) :);
     __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x23), "al"(0x01) :);
     /* Disable i8259a */
@@ -69,6 +46,25 @@ void init_local_apic()
     LocalAPIC[LVTFault] = LVT_MASKED | 0;
     LocalAPIC[LVTPerformance] = LVT_MASKED | DILIVERY_MODE_FIXED | 0;
     LocalAPIC[LVTTemperature] = LVT_MASKED | DILIVERY_MODE_FIXED | 0;
+}
+
+void init_apic_bsp(void)
+{
+    init_apic_ap();
+    /* I/O APIC */
+    IoAPIC.RegisterSelect = (uint8_t*)easy_phy2linear(IO_REGISTER_SELECT);
+    IoAPIC.Data = (uint32_t*)easy_phy2linear(IO_WINDOW);
+    IoAPIC.BspApicId = (uint64_t)LocalAPIC[LocalAPICId] >> 24;
+    IoAPIC.IoEOI = (uint32_t*)easy_phy2linear(IO_EOI_REGISTER);
+    uint64_t chip_configuation = (uint64_t)easy_phy2linear(read_pcie(MAKE_PCIE_ADDR(0, 31, 0, 0xf0)) & 0xfffffc000);
+    /* OIC寄存器开启IO APIC */
+    *((uint32_t*)(chip_configuation + 0x31fe)) = 1 << 8;
+    IoAPIC.RTENumber = (read_io_apic(IO_APIC_VERSION) >> 16) + 1;
+    for (uint64_t i = 0; i < IoAPIC.RTENumber; i++) {
+        write_io_apic(IO_APIC_REDIRECTION_TABLE_HIGH(i), IoAPIC.BspApicId << 24);
+        write_io_apic(IO_APIC_REDIRECTION_TABLE_LOW(i), LVT_MASKED | (0x20 + i));
+        intr_handler[i] = (uint64_t)default_intr_soft;
+    }
 }
 
 /// @brief 设置中断处理程序
@@ -151,6 +147,9 @@ static void broadcast_ipi_startup(void)
 }
 
 extern uint8_t ap_code_data_start[];
+uint32_t ap_startup_lock;
+uint32_t ap_startup_count;
+uint32_t ap_ready_num;
 void init_ap(void){
     memcpy(easy_phy2linear(PHYSIC_ADDR_AP_CODE_DATA),ap_code_data_start,512);
     broadcast_ipi_init();
@@ -158,6 +157,8 @@ void init_ap(void){
     {
         __asm__ __volatile__("nop");
     }
+    ap_startup_lock = 0;
     broadcast_ipi_startup();
+    while(cpus->total_num > ap_ready_num + 1) __asm__ __volatile__("pause");
+    low_print("[BspCore] All AP start up finished!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
 }
-

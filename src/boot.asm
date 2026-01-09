@@ -18,6 +18,9 @@ global intr2_bsp
 
 extern cstart,exception_handler
 extern intr_handler,timer_intr_soft_bsp
+extern ap_startup_lock
+extern ap_ready_num
+extern ap_start
 
 section .multiboot
     align 4
@@ -152,6 +155,16 @@ section .text64high
         call cstart
         jmp $
     .ap:
+        pause
+        xor rax,rax
+        mov ebx,1
+        lock cmpxchg [rel ap_startup_lock],ebx
+        cmp rax,0
+        jne .ap
+        mov rsp,ap_startup_stack_top
+        call ap_start
+        inc dword[rel ap_ready_num]
+        mov [rel ap_startup_lock],0
         jmp $
 
     %macro irq_err_save 0
@@ -437,6 +450,8 @@ section .kernel.bss nobits alloc
     kernel_stack_bottom:
         resb 4096 ;栈空间
     kernel_stack_top:
+        resb 512
+    ap_startup_stack_top:
 
 ;会被加载到0x10000
 section .apboot16
