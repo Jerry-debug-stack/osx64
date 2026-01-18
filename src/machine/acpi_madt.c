@@ -4,6 +4,8 @@
 #include "const.h"
 #include "view/view.h"
 #include "machine/cpu.h"
+#include "mm/mm.h"
+#include "lib/string.h"
 
 GLOBAL_CPU* cpus;
 // ACPI相关结构
@@ -161,6 +163,8 @@ uint32_t get_logic_cpu_id(void){
 }
 
 void init_acpi_madt(void){
+    cpus = kmalloc(sizeof(GLOBAL_CPU));
+    memset(cpus,0,sizeof(GLOBAL_CPU));
     rsdp = find_rsdp();
     if (!rsdp){
         low_printf("[ PANIC ] rsdp not found!!!",VIEW_COLOR_RED,VIEW_COLOR_WHITE);

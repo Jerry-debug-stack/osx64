@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include "const.h"
+#include "lib/my_list.h"
+#include "task.h"
 
 typedef struct
 {
@@ -11,6 +13,9 @@ typedef struct
     uint32_t *gdt_ptr;
     uint32_t *idt_ptr;
     uint32_t *tss;
+    pcb_t* now_running;
+    pcb_t* idle;
+    spin_list_head_t ready_list;
 } CPU_ITEM;
 
 typedef struct

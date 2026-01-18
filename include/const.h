@@ -13,6 +13,10 @@
         __asm__ __volatile__("cli;hlt"); \
     } while (1);
 
+#define container_of(ptr, type, member) ({ \
+    const typeof(((type *)0)->member) *__mptr = (ptr); \
+    (type *)((char *)__mptr - offsetof(type, member)); })
+
 #define SELECTOR_KERNEL_CS (0x1 << 3)
 #define SELECTOR_KERNEL_DS (0x2 << 3)
 
@@ -26,5 +30,6 @@
 #endif
 
 #define MAX_CPU_NUM                     32
+#define DEFAULT_PCB_SIZE                8*1024
 
 #endif

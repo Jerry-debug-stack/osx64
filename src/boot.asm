@@ -15,12 +15,14 @@ global DoubleFault,CoprocessorSegmentOverRun,InvalidTSS,SegmentNotPresent,Genera
 global AlignmentCheck,MachineCheck,SIMDException,VirtualizationException,StackSegmentFault,Divide_Error
 global intr0,intr1,intr2,intr3,intr4,intr5,intr6,intr7,intr8,intr9,intr10,intr11,intr12,intr13,intr14,intr15,intr16,intr17,intr18,intr19,intr20,intr21,intr22,intr23
 global intr2_bsp
+global task_switch,asm_task_start,asm_task_start_go_out
 
 extern cstart,exception_handler
 extern intr_handler,timer_intr_soft_bsp
 extern ap_startup_lock
 extern ap_ready_num
 extern ap_start
+extern task_ready
 
 section .multiboot
     align 4
@@ -163,8 +165,6 @@ section .text64high
         jne .ap
         mov rsp,ap_startup_stack_top
         call ap_start
-        inc dword[rel ap_ready_num]
-        mov [rel ap_startup_lock],0
         jmp $
 
     %macro irq_err_save 0
@@ -444,6 +444,38 @@ section .text64high
         mov ax,(5<<3)|0
         ltr ax
         ret
+    
+    asm_task_start:
+        inc dword[rel ap_ready_num]
+        mov [rel ap_startup_lock],0
+        mov rsp, rdi
+        pop rbx
+        pop rbp
+        pop r13
+        pop r14
+        pop r15
+        ret
+    
+    asm_task_start_go_out:
+        go_out
+
+    task_switch:
+        push r15
+        push r14
+        push r13
+        push rbp
+        push rbx
+        ;保存栈的位置
+        mov [rdi],rsp
+        ;读取另一个栈
+        mov rsp,[rsi]
+        pop rbx
+        pop rbp
+        pop r13
+        pop r14
+        pop r15
+        ret
+
 
 section .kernel.bss nobits alloc
     align 16
