@@ -6,31 +6,42 @@
 
 /* ====================== 锁类型定义 ====================== */
 
-/* 自旋锁（用于短临界区，不可睡眠） */
+/* 自旋锁（用于短临界区，不可中断） */
 typedef struct {
     volatile uint32_t lock;
-} spinlock_t;
+} spin_lock_t;
+
+/* 简化自旋锁,可中断 */
+typedef struct {
+    volatile uint32_t lock;
+} spin_lock_int_able_t;
 
 /* 互斥锁（用于可能睡眠的长临界区） */
 typedef struct {
     volatile int locked;
     list_head_t wait_queue;  // 等待队列
-    spinlock_t queue_lock;        // 等待队列锁
+    spin_lock_t queue_lock;        // 等待队列锁
 } mutex_t;
 
 /* 读写锁（读多写少场景） */
 typedef struct {
     volatile int readers;
     volatile int writer;
-    spinlock_t lock;
+    spin_lock_t lock;
 } rwlock_t;
 
 
 /* 自旋锁操作 */
-void spin_lock_init(spinlock_t *lock);
-void spin_lock(spinlock_t *lock);
-void spin_unlock(spinlock_t *lock);
-int spin_trylock(spinlock_t *lock);
+void spin_lock_init(spin_lock_t *lock);
+void spin_lock(spin_lock_t *lock);
+void spin_unlock(spin_lock_t *lock);
+int spin_trylock(spin_lock_t *lock);
+
+/* 可中断自旋锁操作 */
+void spin_lock_int_able_init(spin_lock_int_able_t *lock);
+void spin_lock_int_able(spin_lock_int_able_t *lock);
+void spin_int_able_unlock(spin_lock_int_able_t *lock);
+int spin_int_able_trylock(spin_lock_int_able_t *lock);
 
 /* 互斥锁操作 */
 void mutex_init(mutex_t *lock);
@@ -45,26 +56,10 @@ void read_unlock(rwlock_t *lock);
 void write_lock(rwlock_t *lock);
 void write_unlock(rwlock_t *lock);
 
-
-/* 通用带锁链表头 */
-typedef struct safe_list_head {
-    list_head_t list;  // 实际链表
-    void *lock;             // 锁指针，可以是spinlock_t, mutex_t, rwlock_t
-    uint8_t lock_type;      // 锁类型
-} safe_list_head_t;
-
-/* 锁类型枚举 */
-enum {
-    LOCK_NONE = 0,
-    LOCK_SPIN,
-    LOCK_MUTEX,
-    LOCK_RW
-};
-
 /* 带自旋锁的链表（最常用） */
 typedef struct spin_list_head {
     list_head_t list;
-    spinlock_t lock;
+    spin_lock_t lock;
 } spin_list_head_t;
 
 /* 带互斥锁的链表 */
@@ -179,66 +174,6 @@ static inline int spin_list_try_add(list_head_t *new_,
     return 0;
 }
 
-/* ========== 通用锁链表操作 ========== */
-
-/* 通用锁初始化 */
-static inline void safe_list_init(safe_list_head_t *head, 
-                                  void *lock, uint8_t lock_type)
-{
-    INIT_LIST_HEAD(&head->list);
-    head->lock = lock;
-    head->lock_type = lock_type;
-}
-
-/* 通用锁获取 */
-static inline void safe_lock(safe_list_head_t *head)
-{
-    switch (head->lock_type) {
-        case LOCK_SPIN:
-            spin_lock((spinlock_t *)head->lock);
-            break;
-        case LOCK_MUTEX:
-            mutex_lock((mutex_t *)head->lock);
-            break;
-        case LOCK_RW:
-            write_lock((rwlock_t *)head->lock);
-            break;
-    }
-}
-
-/* 通用锁释放 */
-static inline void safe_unlock(safe_list_head_t *head)
-{
-    switch (head->lock_type) {
-        case LOCK_SPIN:
-            spin_unlock((spinlock_t *)head->lock);
-            break;
-        case LOCK_MUTEX:
-            mutex_unlock((mutex_t *)head->lock);
-            break;
-        case LOCK_RW:
-            write_unlock((rwlock_t *)head->lock);
-            break;
-    }
-}
-
-/* 通用带锁操作 */
-static inline void safe_list_add(list_head_t *new_,
-                                 safe_list_head_t *head)
-{
-    safe_lock(head);
-    list_add(new_, &head->list);
-    safe_unlock(head);
-}
-
-static inline void safe_list_del(list_head_t *entry,
-                                 safe_list_head_t *head)
-{
-    safe_lock(head);
-    list_del(entry);
-    safe_unlock(head);
-}
-
 /* ====================== 安全遍历宏 ====================== */
 
 /* ========== 自旋锁安全遍历 ========== */
@@ -310,67 +245,6 @@ static inline void safe_list_del(list_head_t *entry,
             __cond; }); \
          pos = container_of(pos->member.next, typeof(*pos), member))
 
-/* ====================== 中断安全操作 ====================== */
-
-/* 中断上下文安全的自旋锁（保存/恢复中断状态） */
-typedef struct {
-    spinlock_t lock;
-    unsigned long flags;
-} spinlock_irq_t;
-
-/* 初始化中断安全自旋锁 */
-static inline void spin_lock_irq_init(spinlock_irq_t *lock)
-{
-    spin_lock_init(&lock->lock);
-    lock->flags = 0;
-}
-
-/* 获取锁并禁用中断 */
-static inline void spin_lock_irq(spinlock_irq_t *lock)
-{
-    // 这里需要CPU特定的中断禁用操作
-    // 伪代码：lock->flags = disable_interrupts();
-    spin_lock(&lock->lock);
-}
-
-/* 释放锁并恢复中断 */
-static inline void spin_unlock_irq(spinlock_irq_t *lock)
-{
-    spin_unlock(&lock->lock);
-    // 伪代码：restore_interrupts(lock->flags);
-}
-
-/* 中断安全的链表 */
-struct irq_safe_list_head {
-    list_head_t list;
-    spinlock_irq_t lock;
-};
-
-#define IRQ_SAFE_LIST_HEAD_INIT(name) {      \
-    .list = LIST_HEAD_INIT(name.list),       \
-    .lock = { .lock = { .lock = 0 }, .flags = 0 } \
-}
-
-#define IRQ_SAFE_LIST_HEAD(name) \
-    struct irq_safe_list_head name = IRQ_SAFE_LIST_HEAD_INIT(name)
-
-/* 中断安全操作 */
-static inline void irq_safe_list_add(list_head_t *new_,
-                                     struct irq_safe_list_head *head)
-{
-    spin_lock_irq(&head->lock);
-    list_add(new_, &head->list);
-    spin_unlock_irq(&head->lock);
-}
-
-/* 中断安全遍历 */
-#define irq_safe_list_for_each_entry_safe(pos, n, head, member) \
-    for (spin_lock_irq(&(head)->lock), \
-         pos = container_of((head)->list.next, typeof(*pos), member), \
-         n = container_of(pos->member.next, typeof(*pos), member); \
-         &pos->member != &(head)->list; \
-         pos = n, n = container_of(n->member.next, typeof(*n), member))
-
 /* ====================== 条件操作 ====================== */
 
 /* 条件添加：只有在条件满足时才添加 */
@@ -409,4 +283,4 @@ static inline int spin_list_remove_if(spin_list_head_t *head,
 }
 
 
-#endif /* _SAFE_LIST_H_ */
+#endif

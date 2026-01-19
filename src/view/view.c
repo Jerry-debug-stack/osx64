@@ -4,6 +4,7 @@
 #include "mm/mm.h"
 #include "multiboot.h"
 #include "view/font.h"
+#include "lib/safelist.h"
 
 #define SCREEN_WIDTH 1280
 #define SCREEN_HEIGHT 720
@@ -19,6 +20,7 @@ static struct
     uint32_t disp_position;
     uint16_t disp_c_x;
     uint16_t disp_c_y;
+    spin_lock_int_able_t view_lock;
 } vMm;
 
 static void screen_clear(uint32_t color_back);
@@ -29,6 +31,7 @@ void init_view(MULTIBOOT_INFO* info)
     vMm.disp_position = 0;
     vMm.disp_c_x = 0;
     vMm.disp_c_y = 0;
+    spin_lock_int_able_init(&vMm.view_lock);
 }
 
 UNUSED static void copy_creen(uint32_t** buffer)
@@ -66,6 +69,7 @@ static void next_line(void)
     if (vMm.disp_c_y >= (SCREEN_HEIGHT / CHAR_Y)) {
         vMm.disp_c_y = 0;
         vMm.disp_position = 0;
+        screen_clear(VIEW_COLOR_BLACK);
     } else {
         vMm.disp_position = vMm.disp_c_y * ROW_SIZE_INTS;
     }
@@ -117,11 +121,20 @@ static void print_char(uint8_t ch, uint32_t color_back, uint32_t color_fore)
     }
 }
 
+#include <stdbool.h>
+extern bool multi_core_start;
+
 void low_print(char* str, uint32_t color_back, uint32_t color_fore)
 {
+    if (multi_core_start){
+        spin_lock_int_able(&vMm.view_lock);
+    }
     uint32_t i = 0;
     while (str[i] != 0) {
         print_char((uint8_t)str[i], color_back, color_fore);
         i++;
+    }
+    if (multi_core_start){
+        spin_int_able_unlock(&vMm.view_lock);
     }
 }

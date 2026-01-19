@@ -4,13 +4,13 @@
 /* ====================== 自旋锁实现 ====================== */
 
 /* 自旋锁初始化 */
-void spin_lock_init(spinlock_t *lock)
+void spin_lock_init(spin_lock_t *lock)
 {
     lock->lock = 0;
 }
 
 /* 获取自旋锁（忙等待） */
-void spin_lock(spinlock_t *lock)
+void spin_lock(spin_lock_t *lock)
 {
     uint8_t intr = io_cli();
     while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
@@ -21,7 +21,7 @@ void spin_lock(spinlock_t *lock)
 }
 
 /* 释放自旋锁 */
-void spin_unlock(spinlock_t *lock)
+void spin_unlock(spin_lock_t *lock)
 {
     /* 内存屏障 */
     __sync_synchronize();
@@ -30,7 +30,39 @@ void spin_unlock(spinlock_t *lock)
 }
 
 /* 尝试获取自旋锁（非阻塞） */
-int spin_trylock(spinlock_t *lock)
+int spin_trylock(spin_lock_t *lock)
+{
+    return !atomic_compare_exchange((uint32_t*)&lock->lock,0,1);
+}
+
+/* ====================== 可中断自旋锁实现 ====================== */
+
+/* 自旋锁初始化 */
+void spin_lock_int_able_init(spin_lock_int_able_t *lock)
+{
+    lock->lock = 0;
+}
+
+/* 获取自旋锁（忙等待） */
+void spin_lock_int_able(spin_lock_int_able_t *lock)
+{
+    while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
+        __asm__ __volatile__("pause");
+    }
+    __sync_synchronize();
+}
+
+/* 释放自旋锁 */
+void spin_int_able_unlock(spin_lock_int_able_t *lock)
+{
+    /* 内存屏障 */
+    __sync_synchronize();
+    /* 原子释放 */
+    __sync_lock_release(&lock->lock);
+}
+
+/* 尝试获取自旋锁（非阻塞） */
+int spin_int_able_trylock(spin_lock_int_able_t *lock)
 {
     return !atomic_compare_exchange((uint32_t*)&lock->lock,0,1);
 }

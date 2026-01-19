@@ -10,7 +10,7 @@
 
 typedef struct task_manager{
     spin_list_head_t all_list;
-    spinlock_t id_lock;
+    spin_lock_t id_lock;
     uint64_t next_free_id;
 } task_manager_t;
 

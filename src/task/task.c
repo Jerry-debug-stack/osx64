@@ -4,12 +4,13 @@
 #include "lib/string.h"
 #include "machine/cpu.h"
 #include "const.h"
+#include "lib/io.h"
 
 extern GLOBAL_CPU *cpus;
 
 extern void asm_task_start_go_out(void);
 extern void task_switch(pcb_t *old,pcb_t *new);
-extern void asm_task_start(uint64_t rsp);
+extern _Noreturn void asm_task_start(uint64_t rsp);
 
 extern void init(void);
 extern void idle(void);
@@ -27,17 +28,18 @@ void init_task(void)
     task_manager.next_free_id = 0;
     spin_lock_init(&task_manager.id_lock);
     /* 初始化init进程 */
-    pcb_t* init_ = put_kernel_thread("init",init,NULL);
-    //add_to_cpu_n_ready_list(init_,get_logic_cpu_id()); //将init进程先行加给bsp
+    pcb_t* task_init = put_kernel_thread("init",init,NULL);
+    //
     /* 各个cpu的idle进程 */
     CPU_ITEM* item;
     for(uint32_t i = 0;i < cpus->total_num;i++){
         item = &cpus->items[i];
         spin_list_init(&item->ready_list);
-        pcb_t *task_idle = put_kernel_thread("idle",idle,init_);
+        pcb_t *task_idle = put_kernel_thread("idle",idle,task_init);
         item->idle = task_idle;
-        add_to_cpu_n_ready_list(put_kernel_thread("idle",idle,init_),i);
+        add_to_cpu_n_ready_list(task_idle,i);
     }
+    add_to_cpu_n_ready_list(task_init,get_logic_cpu_id()); //将init进程先行加给bsp
 }
 
 /**
@@ -56,13 +58,17 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
 {
     pcb_t *new_task = kmalloc(DEFAULT_PCB_SIZE);
     memset(new_task, 0, DEFAULT_PCB_SIZE);
+    INIT_LIST_HEAD(&new_task->all_list);
+    INIT_LIST_HEAD(&new_task->child_list_item);
+    INIT_LIST_HEAD(&new_task->other_list_item);
+    INIT_LIST_HEAD(&new_task->ready_list_item);
     /* pid */
     alloc_pid_and_add_to_all_list(new_task);
     /* parent */
     if (parent)
     {
         new_task->parent = parent;
-        spin_list_add_tail(&new_task->ready_list_item, &parent->childs);
+        spin_list_add_tail(&new_task->child_list_item, &parent->childs);
     }
     else
     {
@@ -120,6 +126,7 @@ static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n){
 }
 
 void schedule(UNUSED uint8_t to_state){
+    uint32_t intr = io_cli();
     uint32_t id = get_logic_cpu_id();
     CPU_ITEM *item = &cpus->items[id];
     spin_lock(&item->ready_list.lock);
@@ -139,10 +146,11 @@ void schedule(UNUSED uint8_t to_state){
     item->now_running = will_run;
     spin_unlock(&item->ready_list.lock);
     task_switch(before_run,will_run);
+    io_set_intr(intr);
 }
 
-void cpu_task_start(void){
+_Noreturn void cpu_task_start(void){
     uint32_t id = get_logic_cpu_id();
-    cpus->items[id].now_running = cpus->items[id].now_running;
+    cpus->items[id].now_running = cpus->items[id].idle;
     asm_task_start(cpus->items[id].idle->rsp);
 }

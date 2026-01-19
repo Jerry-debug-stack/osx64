@@ -12,7 +12,7 @@ uint32_t* LocalAPIC;
 IO_APIC IoAPIC;
 
 void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_t ist, uint64_t dpl, uint64_t type);
-void default_intr_soft(void);
+static void default_intr_soft(void);
 
 void disable_irq(uint16_t irq);
 void enable_irq(uint16_t irq);
@@ -65,6 +65,9 @@ void init_apic_bsp(void)
         write_io_apic(IO_APIC_REDIRECTION_TABLE_LOW(i), LVT_MASKED | (0x20 + i));
         intr_handler[i] = (uint64_t)default_intr_soft;
     }
+    /* 对时钟的初始化，直接通过ioapic进行广播 */
+    write_io_apic(IO_APIC_REDIRECTION_TABLE_HIGH(2),0xff000000);
+    write_io_apic(IO_APIC_REDIRECTION_TABLE_LOW(2),LVT_MASKED | 0x22);
 }
 
 /// @brief 设置中断处理程序
@@ -91,16 +94,15 @@ void enable_irq(uint16_t irq)
     write_io_apic(IO_APIC_REDIRECTION_TABLE_LOW(irq), (read_io_apic(IO_APIC_REDIRECTION_TABLE_LOW(irq)) & (~((uint64_t)LVT_MASKED))));
 }
 
-void set_EOI(uint32_t irq)
+void set_EOI()
 {
-    *(IoAPIC.IoEOI) = irq;
     LocalAPIC[EOI] = 0;
 }
 
 /// @brief 默认的中断处理程序
-void default_intr_soft(void)
+static void default_intr_soft(void)
 {
-    set_EOI(0);
+    set_EOI();
 }
 
 static inline void write_io_apic(uint64_t Register, uint64_t Data)
