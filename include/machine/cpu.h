@@ -16,6 +16,8 @@ typedef struct
     pcb_t* now_running;
     pcb_t* idle;
     spin_list_head_t ready_list;
+    uint32_t time_intr_reenter;
+    spin_list_head_t timer_list;
 } CPU_ITEM;
 
 typedef struct

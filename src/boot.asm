@@ -192,6 +192,7 @@ section .text64high
         mov ds,rbx
     %endmacro
     %macro go_out 0
+        cli
         pop rbx
         mov ds,rbx
         pop rbx
@@ -211,7 +212,6 @@ section .text64high
         pop rcx
         pop rbx
         pop rax
-        cli
         iretq
     %endmacro
     %macro intr 1
@@ -242,7 +242,6 @@ section .text64high
         mov rbx,0x10
         mov es,rbx
         mov ds,rbx
-        sti
     %endmacro
  
     align 16
@@ -434,7 +433,6 @@ section .text64high
     align 16
     intr2_bsp :
         save
-        cli
         call timer_intr_soft_bsp
         go_out
 

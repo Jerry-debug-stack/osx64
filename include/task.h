@@ -30,6 +30,9 @@ typedef struct pcb
     list_head_t ready_list_item;
     list_head_t other_list_item;
     list_head_t child_list_item;
+    /* 定时器 */
+    spin_list_head_t timers;
+    uint32_t signal;
     uint32_t magic;
 } pcb_t;
 

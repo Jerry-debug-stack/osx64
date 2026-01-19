@@ -62,6 +62,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     INIT_LIST_HEAD(&new_task->child_list_item);
     INIT_LIST_HEAD(&new_task->other_list_item);
     INIT_LIST_HEAD(&new_task->ready_list_item);
+    spin_list_init(&new_task->timers);
     /* pid */
     alloc_pid_and_add_to_all_list(new_task);
     /* parent */
@@ -89,6 +90,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     }
     new_task->is_ker = true;
     new_task->magic = TASK_MAGIC;
+    new_task->signal = 0;
     /* start up 栈空间 */
     registers_t *reg = (void *)((uint64_t)new_task + DEFAULT_PCB_SIZE - sizeof(registers_t));
     task_start_t *task_start = (void *)((uint64_t)new_task + DEFAULT_PCB_SIZE - (sizeof(registers_t) + sizeof(task_start_t)));
