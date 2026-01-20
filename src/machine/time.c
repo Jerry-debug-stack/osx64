@@ -13,6 +13,7 @@ extern void set_EOI(void);
 extern void disable_irq(uint64_t irq);
 extern void enable_irq(uint64_t irq);
 extern uint32_t get_logic_cpu_id(void);
+extern void schedule(UNUSED uint8_t to_state);
 
 uint64_t ticks;
 
@@ -38,7 +39,7 @@ void init_time(void)
     enable_irq(2);
 }
 
-void schedule(UNUSED uint8_t to_state);
+
 void timer_intr_soft(void){
     /* 进入时关着中断 */
     uint32_t id = get_logic_cpu_id();
@@ -50,11 +51,11 @@ void timer_intr_soft(void){
     cpu->time_intr_reenter++;
     /* 调度请求标志 */
     bool need_schedule = true;
-    /// step 1 处理本地时钟
+    /* step 1 处理本地时钟 */ 
     local_timer_timeout(cpu);
-    /// step 2 分析负载均衡
+    /* step 2 分析负载均衡 */
 
-    /// step 3 考虑是否需要调度
+    /* step 3 考虑是否需要调度 */
     /* 这里保留作以后处理 */
     __asm__ __volatile__("sti");
     /* 下半段 */
@@ -64,6 +65,8 @@ void timer_intr_soft(void){
     if (need_schedule){
         schedule(0);
     }
+    /* 判断信号递送 */
+
 }
 
 void timer_intr_soft_bsp(void){

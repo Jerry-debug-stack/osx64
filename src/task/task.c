@@ -91,6 +91,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     new_task->is_ker = true;
     new_task->magic = TASK_MAGIC;
     new_task->signal = 0;
+    new_task->state = TASK_STATE_READY;
     /* start up 栈空间 */
     registers_t *reg = (void *)((uint64_t)new_task + DEFAULT_PCB_SIZE - sizeof(registers_t));
     task_start_t *task_start = (void *)((uint64_t)new_task + DEFAULT_PCB_SIZE - (sizeof(registers_t) + sizeof(task_start_t)));
@@ -145,7 +146,9 @@ void schedule(UNUSED uint8_t to_state){
         list_add_tail(&item->now_running->ready_list_item,&item->ready_list.list);
     }
     ///@todo handle Cr3
+    item->now_running->state = TASK_STATE_READY;
     item->now_running = will_run;
+    will_run->state = TASK_STATE_RUNNING;
     spin_unlock(&item->ready_list.lock);
     task_switch(before_run,will_run);
     io_set_intr(intr);

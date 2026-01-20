@@ -14,6 +14,15 @@ typedef struct task_manager{
     uint64_t next_free_id;
 } task_manager_t;
 
+enum task_state{
+    TASK_STATE_READY,
+    TASK_STATE_RUNNING,
+    TASK_STATE_SLEEP_INTERRUPTABLE,
+    TASK_STATE_SLEEP_NOT_INTR_ABLE,
+    TASK_ZOMBIE,
+    TASK_DEAD,
+};
+
 typedef struct pcb
 {
     /* 直接通过与运算就可以解决问题 */
@@ -34,6 +43,7 @@ typedef struct pcb
     spin_list_head_t timers;
     uint32_t signal;
     uint32_t magic;
+    enum task_state state;
 } pcb_t;
 
 /// @brief 保存上下文信息
