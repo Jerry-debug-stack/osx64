@@ -15,6 +15,7 @@ typedef struct
     uint32_t *tss;
     pcb_t* now_running;
     pcb_t* idle;
+    volatile uint32_t total_ready_num;
     spin_list_head_t ready_list;
     uint32_t time_intr_reenter;
     spin_list_head_t timer_list;

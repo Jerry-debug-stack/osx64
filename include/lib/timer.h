@@ -25,5 +25,6 @@ typedef struct timer
     uint32_t signal;
 } timer_t;
 
+// local_timer_timeout的返回取值约定：位标志
 
 #endif

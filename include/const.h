@@ -23,6 +23,8 @@
 #define SYSCALL_INTERRUPT_VECTOR 0x80
 #define MAX_SYSCALL_NUM          128
 
+#define MULTI_CORE_BALANCE_DELTA        4
+
 #ifdef __GNUC__
 #define UNUSED __attribute__((unused))
 #else

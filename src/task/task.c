@@ -35,9 +35,9 @@ void init_task(void)
     for(uint32_t i = 0;i < cpus->total_num;i++){
         item = &cpus->items[i];
         spin_list_init(&item->ready_list);
+        item->total_ready_num = 0;
         pcb_t *task_idle = put_kernel_thread("idle",idle,task_init);
         item->idle = task_idle;
-        add_to_cpu_n_ready_list(task_idle,i);
     }
     add_to_cpu_n_ready_list(task_init,get_logic_cpu_id()); //将init进程先行加给bsp
 }
@@ -125,7 +125,11 @@ static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n){
     if (n >= cpus->total_num){
         halt();
     }
-    spin_list_add_tail(&task->ready_list_item,&cpus->items[n].ready_list);
+    spin_list_head_t *tar_ready_list = &cpus->items[n].ready_list;
+    spin_lock(&tar_ready_list->lock);
+    list_add_tail(&task->ready_list_item,&tar_ready_list->list);
+    cpus->items[n].total_ready_num++;
+    spin_unlock(&tar_ready_list->lock);
 }
 
 void schedule(UNUSED uint8_t to_state){
@@ -138,12 +142,14 @@ void schedule(UNUSED uint8_t to_state){
         list_head_t* next_ = item->ready_list.list.next;
         list_del_init(next_);
         will_run = container_of(next_,pcb_t,ready_list_item);
+        item->total_ready_num--;
     }else{
         ///@todo to_state!!!
         will_run = item->idle;
     }
     if (item->now_running != item->idle){
         list_add_tail(&item->now_running->ready_list_item,&item->ready_list.list);
+        item->total_ready_num++;
     }
     ///@todo handle Cr3
     item->now_running->state = TASK_STATE_READY;
