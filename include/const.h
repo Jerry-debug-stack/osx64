@@ -21,7 +21,7 @@
 #define SELECTOR_KERNEL_DS (0x2 << 3)
 
 #define SYSCALL_INTERRUPT_VECTOR 0x80
-#define KERNEL_SCHEDULE_VECTOR 0x81
+#define MAX_SYSCALL_NUM          128
 
 #ifdef __GNUC__
 #define UNUSED __attribute__((unused))

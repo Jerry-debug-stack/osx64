@@ -10,7 +10,7 @@ gccBuild 		= -m64 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mc
 
 c_srcs			= $(shell find src -name "*.c")
 
-asm_objs		= target/boot.o
+asm_objs		= target/boot.o target/sysapi.o
 c_objs			= $(patsubst src/%.c,target/%.o,$(c_srcs))
 
 objs			= $(asm_objs) $(c_objs)
@@ -26,6 +26,9 @@ $(target): $(target_elf)
 	$(objcopy) -O binary -S $^ $@
 
 target/boot.o: src/boot.asm
+	$(nasm) -f elf64 -g -I$(inc) -o $@ $^
+
+target/sysapi.o: src/usr/sysapi.asm
 	$(nasm) -f elf64 -g -I$(inc) -o $@ $^
 
 target/%.o: src/%.c

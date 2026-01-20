@@ -15,6 +15,7 @@ global DoubleFault,CoprocessorSegmentOverRun,InvalidTSS,SegmentNotPresent,Genera
 global AlignmentCheck,MachineCheck,SIMDException,VirtualizationException,StackSegmentFault,Divide_Error
 global intr0,intr1,intr2,intr3,intr4,intr5,intr6,intr7,intr8,intr9,intr10,intr11,intr12,intr13,intr14,intr15,intr16,intr17,intr18,intr19,intr20,intr21,intr22,intr23
 global intr2_bsp
+global syscall_enter
 global task_switch,asm_task_start,asm_task_start_go_out
 
 extern cstart,exception_handler
@@ -23,6 +24,7 @@ extern ap_startup_lock
 extern ap_ready_num
 extern ap_start
 extern task_ready
+extern syscall_table
 
 section .multiboot
     align 4
@@ -474,6 +476,39 @@ section .text64high
         pop r15
         ret
 
+    syscall_enter:
+        save
+        cmp rax,128
+        jae .bad
+        shl rax,3
+        add rax,syscall_table
+        mov rax,qword[rax]
+        call rax
+    .out:
+        cli
+        pop rbx
+        mov ds,rbx
+        pop rbx
+        mov es,rbx
+        pop r15
+        pop r14
+        pop r13
+        pop r12
+        pop r11
+        pop r10
+        pop r9
+        pop r8
+        pop rsi
+        pop rdi
+        pop rbp
+        pop rdx
+        pop rcx
+        pop rbx
+        add rsp,8
+        iretq
+    .bad:
+        mov rax,-1
+        jmp .out
 
 section .kernel.bss nobits alloc
     align 16

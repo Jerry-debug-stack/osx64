@@ -56,6 +56,8 @@ void intr21(void);
 void intr22(void);
 void intr23(void);
 
+void syscall_enter(void);
+
 void load_protect(uint32_t* gdt_ptr, uint32_t* idt_ptr);
 
 void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_t ist, uint64_t dpl, uint64_t type);
@@ -105,6 +107,7 @@ void init_protect(uint8_t is_bsp)
     make_idt_descriptor(idt_table, 18, (uint64_t)MachineCheck, 1, 3, IDT_INTERRUPT_GATE);
     make_idt_descriptor(idt_table, 19, (uint64_t)SIMDException, 0, 3, IDT_INTERRUPT_GATE);
     make_idt_descriptor(idt_table, 20, (uint64_t)VirtualizationException, 0, 3, IDT_INTERRUPT_GATE);
+    make_idt_descriptor(idt_table, SYSCALL_INTERRUPT_VECTOR, (uint64_t)syscall_enter,0,3,IDT_INTERRUPT_GATE);
     if (is_bsp) {
         make_idt_descriptor(idt_table, INTERRUPT_VECTOR_8259A_MASTER, (unsigned long)intr0, 0, 3, IDT_INTERRUPT_GATE);
         make_idt_descriptor(idt_table, INTERRUPT_VECTOR_KEYBOARD, (unsigned long)intr1, 0, 3, IDT_INTERRUPT_GATE);
