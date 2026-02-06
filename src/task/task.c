@@ -5,6 +5,7 @@
 #include "machine/cpu.h"
 #include "const.h"
 #include "lib/io.h"
+#include "lib/timer.h"
 
 extern GLOBAL_CPU *cpus;
 
@@ -16,10 +17,13 @@ extern void init(void);
 extern void idle(void);
 
 task_manager_t task_manager;
+pcb_t *pcb_of_init;
 
-static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent);
 static uint32_t alloc_pid_and_add_to_all_list(pcb_t *new_task);
 static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n);
+static void free_task(pcb_t *task);
+
+void test_wait_basic(void);
 
 void init_task(void)
 {
@@ -28,7 +32,7 @@ void init_task(void)
     task_manager.next_free_id = 0;
     spin_lock_init(&task_manager.id_lock);
     /* 初始化init进程 */
-    pcb_t* task_init = put_kernel_thread("init",init,NULL);
+    pcb_of_init = put_kernel_thread("init",init,NULL);
     //
     /* 各个cpu的idle进程 */
     CPU_ITEM* item;
@@ -36,10 +40,10 @@ void init_task(void)
         item = &cpus->items[i];
         spin_list_init(&item->ready_list);
         item->total_ready_num = 0;
-        pcb_t *task_idle = put_kernel_thread("idle",idle,task_init);
-        item->idle = task_idle;
+        pcb_t *pcb_of_idle = put_kernel_thread("idle",idle,pcb_of_init);
+        item->idle = pcb_of_idle;
     }
-    add_to_cpu_n_ready_list(task_init,get_logic_cpu_id()); //将init进程先行加给bsp
+    add_to_cpu_n_ready_list(pcb_of_init,get_logic_cpu_id()); //将init进程先行加给bsp
 }
 
 /**
@@ -54,7 +58,7 @@ void init_task(void)
  * parent选项的存在是为了可能的疑难问题
  * @todo 加上对args的support
  */
-static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
+pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
 {
     pcb_t *new_task = kmalloc(DEFAULT_PCB_SIZE);
     memset(new_task, 0, DEFAULT_PCB_SIZE);
@@ -62,6 +66,8 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     INIT_LIST_HEAD(&new_task->child_list_item);
     INIT_LIST_HEAD(&new_task->other_list_item);
     INIT_LIST_HEAD(&new_task->ready_list_item);
+    INIT_LIST_HEAD(&new_task->wait_list_item);
+    wait_queue_init(&new_task->wait_queue);
     spin_list_init(&new_task->timers);
     /* pid */
     alloc_pid_and_add_to_all_list(new_task);
@@ -132,7 +138,7 @@ static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n){
     spin_unlock(&tar_ready_list->lock);
 }
 
-void schedule(UNUSED uint8_t to_state){
+void schedule(enum task_state to_state){
     uint32_t intr = io_cli();
     uint32_t id = get_logic_cpu_id();
     CPU_ITEM *item = &cpus->items[id];
@@ -148,11 +154,14 @@ void schedule(UNUSED uint8_t to_state){
         will_run = item->idle;
     }
     if (item->now_running != item->idle){
-        list_add_tail(&item->now_running->ready_list_item,&item->ready_list.list);
-        item->total_ready_num++;
+        if (to_state == TASK_STATE_READY){
+            list_add_tail(&item->now_running->ready_list_item,&item->ready_list.list);
+            item->total_ready_num++;
+        }
+        item->now_running->state = to_state;
     }
     ///@todo handle Cr3
-    item->now_running->state = TASK_STATE_READY;
+    
     item->now_running = will_run;
     will_run->state = TASK_STATE_RUNNING;
     spin_unlock(&item->ready_list.lock);
@@ -160,8 +169,101 @@ void schedule(UNUSED uint8_t to_state){
     io_set_intr(intr);
 }
 
+static inline _Noreturn void schedule_zombie(){
+    schedule(TASK_ZOMBIE);
+    __builtin_unreachable();
+}
+
 _Noreturn void cpu_task_start(void){
     uint32_t id = get_logic_cpu_id();
     cpus->items[id].now_running = cpus->items[id].idle;
     asm_task_start(cpus->items[id].idle->rsp);
+}
+
+_Noreturn void sys_exit(int exit_status){
+    /* 关中断,获取锁,去掉所有时钟 */
+    uint8_t intr = io_cli();
+    uint32_t cpu_id = get_logic_cpu_id();
+    CPU_ITEM *this_cpu = &cpus->items[cpu_id];
+    pcb_t *task = this_cpu->now_running;
+    list_head_t *pos;
+    list_head_t *n;
+
+    spin_lock(&this_cpu->timer_list.lock);
+    list_for_each_safe(pos,n,&task->timers.list){
+        timer_t *task_timer = container_of(pos,timer_t,in_task_item);
+        list_del(&task_timer->in_task_item);
+        kfree(task_timer);
+    }
+    spin_unlock(&this_cpu->timer_list.lock);
+    io_set_intr(intr);
+    
+    /* 移交子进程 */
+    spin_lock(&task->childs.lock);
+    spin_lock(&pcb_of_init->childs.lock);
+    pcb_t *child;
+    list_for_each_entry(child, &task->childs.list, child_list_item) {
+        child->parent = pcb_of_init;
+    }
+    list_splice_init(&task->childs.list,&pcb_of_init->childs.list);
+    spin_unlock(&pcb_of_init->childs.lock);
+    spin_unlock(&task->childs.lock);
+
+    /* 设置退出代码 */
+    task->exit_status = exit_status;
+    wake_up_all(&task->parent->wait_queue);
+    schedule_zombie();
+}
+
+int sys_waitpid(int pid, int *status)
+{
+    uint32_t cpu_id = get_logic_cpu_id();
+    CPU_ITEM *this_cpu = &cpus->items[cpu_id];
+    pcb_t *now_pcb = this_cpu->now_running;
+    while (1) {
+        int found_child = 0;
+        spin_lock(&now_pcb->childs.lock);
+        pcb_t *child;
+        list_for_each_entry(child, &now_pcb->childs.list, child_list_item) {
+            if (pid == -1 || child->pid == pid) {
+                found_child = 1;
+                if (child->state == TASK_ZOMBIE) {
+                    int exit_code = child->exit_status;
+                    list_del(&child->child_list_item);
+                    spin_unlock(&now_pcb->childs.lock);
+                    if (status)
+                        *status = exit_code;
+                    free_task(child);
+                    return child->pid;
+                }
+            }
+        }
+        spin_unlock(&now_pcb->childs.lock);
+        if (!found_child)
+            return -1;
+
+        sleep_on(&now_pcb->wait_queue);
+    }
+}
+
+pcb_t *get_current(void){
+    uint32_t cpu_id = get_logic_cpu_id();
+    CPU_ITEM *this_cpu = &cpus->items[cpu_id];
+    return this_cpu->now_running;
+}
+
+void put_to_ready_list(pcb_t *task){
+    uint8_t intr = io_cli();
+    uint32_t cpu_id = get_logic_cpu_id();
+    CPU_ITEM *this_cpu = &cpus->items[cpu_id];
+    spin_lock(&this_cpu->ready_list.lock);
+    list_add(&task->ready_list_item,&this_cpu->ready_list.list);
+    spin_unlock(&this_cpu->ready_list.lock);
+    io_set_intr(intr);
+}
+
+static void free_task(pcb_t *task){
+    if (!task->is_ker){
+    }
+    kfree(task);
 }

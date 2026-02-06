@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "lib/my_list.h"
 #include "lib/safelist.h"
+#include "lib/wait_queue.h"
 
 #define TASK_MAGIC 0x13973264       // for PCB safety
 
@@ -20,7 +21,7 @@ enum task_state{
     TASK_STATE_SLEEP_INTERRUPTABLE,
     TASK_STATE_SLEEP_NOT_INTR_ABLE,
     TASK_ZOMBIE,
-    TASK_DEAD,
+    TASK_DEAD
 };
 
 typedef struct pcb
@@ -29,7 +30,7 @@ typedef struct pcb
     uint64_t rsp;
     /* basic information */
     char *name;
-    uint64_t pid;
+    int pid;
     bool is_ker;
     list_head_t all_list;
     /* parent relationship */
@@ -39,11 +40,14 @@ typedef struct pcb
     list_head_t ready_list_item;
     list_head_t other_list_item;
     list_head_t child_list_item;
+    list_head_t wait_list_item;
+    wait_queue_t wait_queue;
     /* 定时器 */
     spin_list_head_t timers;
     uint32_t signal;
     uint32_t magic;
     enum task_state state;
+    int exit_status;
 } pcb_t;
 
 /// @brief 保存上下文信息
@@ -57,5 +61,9 @@ typedef struct registers {
 typedef struct task_start {
     uint64_t rbx,rbp,r13,r14,r15,ret;
 } task_start_t;
+
+pcb_t *get_current(void);
+void put_to_ready_list(pcb_t *task);
+pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent);
 
 #endif

@@ -13,7 +13,7 @@ extern void set_EOI(void);
 extern void disable_irq(uint64_t irq);
 extern void enable_irq(uint64_t irq);
 extern uint32_t get_logic_cpu_id(void);
-extern void schedule(UNUSED uint8_t to_state);
+extern void schedule(enum task_state to_state);
 
 uint64_t ticks;
 
@@ -66,7 +66,7 @@ void timer_intr_soft(void){
     /* 结束段 */
     cpu->time_intr_reenter--;
     if (need_schedule){
-        schedule(0);
+        schedule(TASK_STATE_READY);
     }
     /* 判断信号递送 */
 
