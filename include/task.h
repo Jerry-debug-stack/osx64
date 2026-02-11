@@ -32,6 +32,8 @@ typedef struct pcb
     char *name;
     int pid;
     bool is_ker;
+    uint64_t cr3;
+    uint32_t cpuid;
     list_head_t all_list;
     /* parent relationship */
     struct pcb *parent;
@@ -63,7 +65,10 @@ typedef struct task_start {
 } task_start_t;
 
 pcb_t *get_current(void);
-void put_to_ready_list(pcb_t *task);
-pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent);
+void put_to_ready_list_first(pcb_t *task);
+pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n);
+void schedule(void);
+void yield(void);
+void put_to_ready_list_first(pcb_t *task);
 
 #endif

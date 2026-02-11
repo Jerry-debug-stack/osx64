@@ -14,6 +14,8 @@ void init_heap()
     mm.nfhp->size = HEAP_SIZE_MAX;
 }
 
+void *slab_alloc(uint32_t size);
+
 uint64_t heap_alloc(uint32_t size)
 {
     HEAP* heap = mm.nfhp;
@@ -24,7 +26,7 @@ uint64_t heap_alloc(uint32_t size)
             heap->size -= aligned_size;
             if (heap->size) {
                 heap->start_addr += aligned_size;
-                HEAP* new = kmalloc(sizeof(HEAP));
+                HEAP* new = slab_alloc(sizeof(HEAP));
                 new->used = 1;
                 new->size = aligned_size;
                 new->start_addr = ret;
@@ -69,6 +71,7 @@ uint64_t heap_alloc(uint32_t size)
     halt();
 }
 
+uint8_t slab_free(void *vir_addr);
 void heap_free(uint64_t addr)
 {
     HEAP* heap = mm.shp;
@@ -83,15 +86,15 @@ void heap_free(uint64_t addr)
                     heap->last->next->last = heap->last;
                 if (heap->last->nextf)
                     heap->last->nextf->lastf = heap->last;
-                kfree(heap->next);
-                kfree(heap);
+                slab_free(heap->next);
+                slab_free(heap);
                 return;
             } else if (heap->last && !heap->last->used) {
                 heap->last->size += heap->size;
                 heap->last->next = heap->next;
                 if (heap->last->next)
                     heap->last->next->last = heap->last;
-                kfree(heap);
+                slab_free(heap);
                 return;
             } else if (heap->next && !heap->next->used) {
                 heap->next->size += heap->size;
@@ -101,7 +104,7 @@ void heap_free(uint64_t addr)
                     heap->last->next = heap->next;
                 else
                     mm.shp = heap->next;
-                kfree(heap);
+                slab_free(heap);
                 return;
             } else {
                 /// tem不能是(void*)0,有heep_alloc保证

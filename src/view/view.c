@@ -124,7 +124,7 @@ static void print_char(uint8_t ch, uint32_t color_back, uint32_t color_fore)
 #include <stdbool.h>
 extern bool multi_core_start;
 
-void low_print(char* str, uint32_t color_back, uint32_t color_fore)
+void color_print(char* str, uint32_t color_back, uint32_t color_fore)
 {
     if (multi_core_start){
         spin_lock_int_able(&vMm.view_lock);

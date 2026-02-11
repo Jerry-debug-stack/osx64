@@ -24,6 +24,7 @@ typedef struct PhysicAreaItem {
 } PHYSIC_AREA_ITEM;
 
 #include "mm/slab.h"
+#include "lib/safelist.h"
 
 typedef struct Heap {
     struct Heap* next;
@@ -62,6 +63,7 @@ typedef struct MmManager {
     struct Heap* nfhp;
     /// @brief heap end
     uint64_t he;
+    spin_lock_t lock;
 } MM_MANAGER;
 
 #define DEFAULT_PAI_NUMBER 128

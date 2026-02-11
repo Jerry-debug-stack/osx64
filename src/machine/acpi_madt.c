@@ -158,7 +158,7 @@ uint32_t get_logic_cpu_id(void){
         if(cpus->physic_apic_id[i] == apic_id)
             return i;
     }
-    low_print("[ PANIC ] Logic cpu id get failed!!!",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    color_print("[ PANIC ] Logic cpu id get failed!!!",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
     halt();
 }
 
@@ -167,12 +167,12 @@ void init_acpi_madt(void){
     memset(cpus,0,sizeof(GLOBAL_CPU));
     rsdp = find_rsdp();
     if (!rsdp){
-        low_printf("[ PANIC ] rsdp not found!!!",VIEW_COLOR_RED,VIEW_COLOR_WHITE);
+        color_printf("[ PANIC ] rsdp not found!!!",VIEW_COLOR_RED,VIEW_COLOR_WHITE);
         halt();
     }
     madt = find_madt();
     if (!madt){
-        low_printf("[ PANIC ] madt not found!!!",VIEW_COLOR_RED,VIEW_COLOR_WHITE);
+        color_printf("[ PANIC ] madt not found!!!",VIEW_COLOR_RED,VIEW_COLOR_WHITE);
         halt();
     }
     cpus->total_num = 0;
@@ -180,7 +180,7 @@ void init_acpi_madt(void){
     // 如果需要在更多核数的情况下快速查找,应当对physic_apic_id排序
     for (size_t i = 0; i < cpus->total_num; i++)
     {
-        low_printf("[  CPU  ] alloc logic id %d for cpu apic %#x\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE,i,cpus->physic_apic_id[i]);
+        color_printf("[  CPU  ] alloc logic id %d for cpu apic %#x\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE,i,cpus->physic_apic_id[i]);
     }
-    low_printf("[  CPU  ] %d CPUs in total\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE,cpus->total_num);
+    color_printf("[  CPU  ] %d CPUs in total\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE,cpus->total_num);
 }

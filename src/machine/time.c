@@ -13,14 +13,14 @@ extern void set_EOI(void);
 extern void disable_irq(uint64_t irq);
 extern void enable_irq(uint64_t irq);
 extern uint32_t get_logic_cpu_id(void);
-extern void schedule(enum task_state to_state);
+extern void schedule();
 
 uint64_t ticks;
 
 void timer_intr_soft(void);
 static inline uint32_t local_timer_timeout(CPU_ITEM *cpu);
 static void add_timer(enum timer_type_enum timer_type,uint64_t first_ticks,uint32_t delta_ticks,pcb_t *task,uint32_t signal);
-static void load_balance(CPU_ITEM *now_cpu);
+static void load_balance(uint32_t id);
 
 void init_time(void)
 {
@@ -56,7 +56,7 @@ void timer_intr_soft(void){
     uint32_t signal = local_timer_timeout(cpu);
     /* step 2 分析负载均衡 */
     if ((ticks + id) & 64){
-        load_balance(cpu);
+        load_balance(id);
     }
     /* step 3 考虑是否需要调度 */
     /* 这里保留作以后处理 */
@@ -66,7 +66,15 @@ void timer_intr_soft(void){
     /* 结束段 */
     cpu->time_intr_reenter--;
     if (need_schedule){
-        schedule(TASK_STATE_READY);
+        pcb_t *current = cpu->now_running;
+        if (current != cpu->idle){
+            current->state = TASK_STATE_READY;
+            spin_lock(&cpu->ready_list.lock);
+            list_add_tail(&current->ready_list_item,&cpu->ready_list.list);
+            cpu->total_ready_num++;
+            spin_unlock(&cpu->ready_list.lock);
+        }
+        schedule();
     }
     /* 判断信号递送 */
 
@@ -166,7 +174,7 @@ static void add_timer(enum timer_type_enum timer_type,uint64_t first_ticks,uint3
  * @note 这只是对于ready列表中的进程
  * @warning 必须要关中断执行,而且需要持有两个CPU的进程列表锁和定时器列表锁
  */
-static void task_timer_travel(pcb_t *task,CPU_ITEM *from_cpu,CPU_ITEM *to_cpu){
+static void task_timer_travel(pcb_t *task,CPU_ITEM *from_cpu,CPU_ITEM *to_cpu,uint32_t to_id){
     spin_list_head_t *to_cpu_timer_list = &to_cpu->timer_list;
     list_head_t *pos;
     list_for_each(pos,&task->timers.list){
@@ -174,6 +182,7 @@ static void task_timer_travel(pcb_t *task,CPU_ITEM *from_cpu,CPU_ITEM *to_cpu){
         list_del_init(&now_timer->list_item);
         append_to_cpu_timer_list(to_cpu_timer_list,now_timer);
     }
+    task->cpuid = to_id;
     list_del_init(&task->ready_list_item);
     list_add_tail(&task->ready_list_item,&to_cpu->ready_list.list);
     from_cpu->total_ready_num--;
@@ -208,7 +217,9 @@ static inline void unlock_load_balance_lock(CPU_ITEM *cpu1,CPU_ITEM *cpu2){
     }
 }
 
-static void tasks_travel(CPU_ITEM *from_cpu,CPU_ITEM *to_cpu){
+static void tasks_travel(uint32_t from_id,uint32_t to_id){
+    CPU_ITEM *from_cpu = &cpus->items[from_id];
+    CPU_ITEM *to_cpu = &cpus->items[to_id];
     if (!from_cpu || !to_cpu || from_cpu == to_cpu) return;
     alloc_load_balance_lock(from_cpu,to_cpu);
     uint32_t from_load = from_cpu->total_ready_num;
@@ -221,17 +232,18 @@ static void tasks_travel(CPU_ITEM *from_cpu,CPU_ITEM *to_cpu){
     for (uint32_t i = 0; i < MULTI_CORE_BALANCE_DELTA; i++)
     {
         pcb_t *task = container_of(cpu_task_list->prev,pcb_t,ready_list_item);
-        task_timer_travel(task,from_cpu,to_cpu);
+        task_timer_travel(task,from_cpu,to_cpu,to_id);
     }
 end:
     unlock_load_balance_lock(from_cpu,to_cpu);
 }
 
-static void load_balance(CPU_ITEM *now_cpu){
+static void load_balance(uint32_t id){
     uint32_t busiest_cpu = -1;
     uint32_t max_load = 0;
     uint32_t min_load = UINT32_MAX;
     uint32_t min_cpu = -1;
+    CPU_ITEM *now_cpu = &cpus->items[id];
     uint32_t now_load = now_cpu->total_ready_num;
     for (uint32_t i = 0; i < cpus->total_num; i++) {
         CPU_ITEM *cpu = &cpus->items[i];
@@ -249,8 +261,8 @@ static void load_balance(CPU_ITEM *now_cpu){
         return;
     }
     if (now_load == max_load){
-        tasks_travel(now_cpu,&cpus->items[min_cpu]);
+        tasks_travel(id,min_cpu);
     }else if (now_load == min_load){
-        tasks_travel(&cpus->items[busiest_cpu],now_cpu);
+        tasks_travel(busiest_cpu,id);
     }
 }

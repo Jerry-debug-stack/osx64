@@ -74,11 +74,12 @@
         - [x] 时钟的迁移和进程的迁移
         - [x] 简单的负载均衡算法
     - [x] 进程exit
-- [ ] PCI总线
-    - [ ] PCI设备树
-    - [ ] AHCI硬盘驱动初步
-      - [ ] Detect一个AHCI
-      - [ ] AHCI读写
+- [x] PCI总线
+    - [x] PCI设备树
+    - [x] AHCI硬盘驱动初步
+      - [x] Detect一个AHCI
+      - [x] AHCI读写
+    - [ ] BLOCK层
 - [ ] 用户进程
     - [ ] 跑起来一个用户进程
       - [ ] 从硬盘上加载

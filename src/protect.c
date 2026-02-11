@@ -161,7 +161,7 @@ void exception_handler(
     unsigned long rsp, unsigned long ss)
 {
     __asm__ __volatile__("cli");
-    low_printf("ERROR HAPPENDED\nIntr:%d err_no:%#lx\ncs:%#lx rip:%#lx\nss:%#lx rsp:%#lx\nrflags:%#lx",
+    color_printf("ERROR HAPPENDED\nIntr:%d err_no:%#lx\ncs:%#lx rip:%#lx\nss:%#lx rsp:%#lx\nrflags:%#lx",
         VIEW_COLOR_RED, VIEW_COLOR_WHITE, interrupt_num, error_no, cs, rip, ss, rsp, rflags);
     while (1) {
         __asm__ __volatile__("cli;hlt;");

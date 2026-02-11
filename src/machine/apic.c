@@ -162,5 +162,5 @@ void init_ap(void){
     ap_startup_lock = 0;
     broadcast_ipi_startup();
     while(cpus->total_num > ap_ready_num + 1) __asm__ __volatile__("pause");
-    low_print("[BspCore] All AP start up finished!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    color_print("[BspCore] All AP start up finished!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
 }
