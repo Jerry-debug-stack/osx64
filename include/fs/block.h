@@ -17,6 +17,10 @@ typedef struct block_device {
 typedef struct {
     block_device_t* devs[BLOCK_DEV_MAX];
     uint32_t count;
+    volatile uint64_t global_block_id;
 } block_manager_t;
+
+int block_register(block_device_t* dev);
+uint64_t alloc_block_id(void);
 
 #endif

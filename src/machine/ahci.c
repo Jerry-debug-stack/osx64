@@ -4,6 +4,7 @@
 #include "machine/disk/ahci.h"
 #include "machine/disk/diskoperation.h"
 #include "machine/disk/disk_hard_ops.h"
+#include "fs/block.h"
 #include "view/view.h"
 #include "mm/mm.h"
 #include "lib/string.h"
@@ -15,10 +16,9 @@ static void init_command_fis_list(hba_mem_t *hbamem, int i);
 int ahci_send(hba_port_t *port, uint64_t lba48, uint32_t count, void *buf, char command, int slot, uint64_t pml4_vir);
 int find_cmdslot(hba_port_t *port);
 uint64_t ahci_device_uid(ahci_identify_t *data);
+static void ahci_register_block_device(ahci_device_t *adev);
 
 static ahci_manager_t ahci_mgr;
-
-ahci_device_t *root_disk;
 
 static void ahci_register_device(hba_mem_t *hba, int port_no)
 {
@@ -29,11 +29,18 @@ static void ahci_register_device(hba_mem_t *hba, int port_no)
     d->hba = hba;
     d->port = &hba->ports[port_no];
     d->port_no = port_no;
+    
+    ahci_send(&hba->ports[port_no], 0, 1, &d->indentify, COMMAND_IDENTIFY, 0, 0);
+    while (1) {
+        if ((hba->ports[port_no].ci & 1) == 0)
+            break;
+    }
+
     spin_lock_int_able_init(&d->lock);
-    root_disk = d;
     ahci_mgr.count++;
     init_command_fis_list(hba,port_no);
     wb_printf("[ AHCI  ] registered device at port %d\n", port_no);
+    ahci_register_block_device(d);
 }
 
 void *init_ahci_disk(int pcie_addr)
@@ -367,4 +374,30 @@ uint64_t ahci_device_uid(ahci_identify_t *data)
 void init_ahci_mem(void)
 {
     memset(&ahci_mgr, 0, sizeof(ahci_mgr));
+}
+
+static int ahci_block_read(block_device_t *bdev,uint64_t lba,uint32_t count,void *buffer)
+{
+    ahci_device_t *adev = (ahci_device_t *)bdev->private_data;
+    return ahci_submit(adev, lba, count, buffer, 0);
+}
+
+static int ahci_block_write(block_device_t *bdev,uint64_t lba,uint32_t count,const void *buffer)
+{
+    ahci_device_t *adev = (ahci_device_t *)bdev->private_data;
+    return ahci_submit(adev, lba, count, (void*)buffer, 1);
+}
+
+static void ahci_register_block_device(ahci_device_t *adev)
+{
+    block_device_t *bdev = kmalloc(sizeof(block_device_t));
+    bdev->id = alloc_block_id();
+    bdev->total_blocks = adev->indentify.lba_sectors_48;
+    bdev->block_size = 512;
+    bdev->private_data = adev;
+
+    bdev->read  = ahci_block_read;
+    bdev->write = ahci_block_write;
+
+    block_register(bdev);
 }

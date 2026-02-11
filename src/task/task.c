@@ -317,5 +317,4 @@ void ahci_kernel_thread(void);
 
 void put_ahci_thread(void){
     kernel_thread("ahci",ahci_kernel_thread,pcb_of_init,0);
-    test_ahci_multi();
 }

@@ -374,6 +374,7 @@ typedef struct {
     ahci_request_t* req_tail;
     ahci_request_t* active[32];  // 每个 slot 当前请求
     spin_lock_int_able_t lock;
+    ahci_identify_t indentify;
 } ahci_device_t;
 
 typedef struct {
