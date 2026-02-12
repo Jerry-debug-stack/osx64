@@ -19,6 +19,7 @@ void init_task(void);
 void init_fs_mem(void);
 void enumerate_pcie_devices(void);
 void put_ahci_thread(void);
+void read_partitions(void);
 
 _Noreturn void cpu_task_start(void);
 
@@ -57,6 +58,7 @@ void init(void){
     init_fs_mem();
     enumerate_pcie_devices();
     put_ahci_thread();
+    read_partitions();
 
     while (1)
     {

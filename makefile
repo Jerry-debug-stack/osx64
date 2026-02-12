@@ -42,9 +42,10 @@ clean:
 	rm -rf target
 	mkdir target
 run:$(target_elf) $(target) $(img)
-	qemu-system-x86_64 -hda $(img) -smp 4 -m 4096 -vga std
+	qemu-system-x86_64 -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0 \
+	-drive file=extended.img,if=none,id=disk1,format=raw -device ide-hd,drive=disk1,bus=ahci.1
 test:$(target_elf) $(target) $(img)
-	qemu-system-x86_64 -s -S -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0
-
+	qemu-system-x86_64 -s -S -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0 \
+	-drive file=extended.img,if=none,id=disk1,format=raw -device ide-hd,drive=disk1,bus=ahci.1
 .PHONY: run all clean test
 

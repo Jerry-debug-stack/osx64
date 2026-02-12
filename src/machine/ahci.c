@@ -17,8 +17,9 @@ int ahci_send(hba_port_t *port, uint64_t lba48, uint32_t count, void *buf, char 
 int find_cmdslot(hba_port_t *port);
 uint64_t ahci_device_uid(ahci_identify_t *data);
 static void ahci_register_block_device(ahci_device_t *adev);
-
 static ahci_manager_t ahci_mgr;
+
+extern int mbr_scan(block_device_t* disk);
 
 static void ahci_register_device(hba_mem_t *hba, int port_no)
 {
@@ -390,11 +391,11 @@ static int ahci_block_write(block_device_t *bdev,uint64_t lba,uint32_t count,con
 
 static void ahci_register_block_device(ahci_device_t *adev)
 {
-    block_device_t *bdev = kmalloc(sizeof(block_device_t));
-    bdev->id = alloc_block_id();
+    block_device_t *bdev = kmalloc(sizeof(real_device_t));
     bdev->total_blocks = adev->indentify.lba_sectors_48;
     bdev->block_size = 512;
     bdev->private_data = adev;
+    bdev->type = BLOCK_DISK;
 
     bdev->read  = ahci_block_read;
     bdev->write = ahci_block_write;

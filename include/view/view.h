@@ -13,5 +13,6 @@
 void color_print(char* str, uint32_t color_back, uint32_t color_fore);
 uint32_t color_printf(const char* fmt, uint32_t color_back, uint32_t color_fore, ...);
 uint32_t wb_printf(const char *fmt,...);
+uint32_t sprintf(char* buf,const char* fmt,uint32_t size,...);
 
 #endif

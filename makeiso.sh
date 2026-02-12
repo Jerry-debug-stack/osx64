@@ -12,7 +12,8 @@ rm -rf $MOUNT
 # 创建新镜像
 dd if=/dev/zero of=$IMG bs=1M count=100
 parted $IMG mklabel msdos
-parted $IMG mkpart primary ext2 1MiB 100%
+parted $IMG mkpart primary ext2 1MiB 20%
+parted $IMG mkpart primary ext2 20% 80%
 parted $IMG set 1 boot on
 
 # 设置环回设备

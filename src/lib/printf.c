@@ -25,6 +25,14 @@ uint32_t wb_printf(const char* fmt,...){
     return written;
 }
 
+uint32_t sprintf(char* buf,const char* fmt,uint32_t size,...){
+    va_list args;
+    va_start(args, size);
+    uint32_t written = vsnprintf(buf, size, fmt, args);
+    va_end(args);
+    return written;
+}
+
 static const char int64_min[] = "-9223372036854775808";
 
 static uint32_t vsnprintf(char* buf, uint32_t size, const char* fmt, va_list args)
