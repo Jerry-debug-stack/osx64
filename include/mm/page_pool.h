@@ -63,7 +63,7 @@ typedef struct MmManager {
     struct Heap* nfhp;
     /// @brief heap end
     uint64_t he;
-    spin_lock_t lock;
+    spinlock_t lock;
 } MM_MANAGER;
 
 #define DEFAULT_PAI_NUMBER 128

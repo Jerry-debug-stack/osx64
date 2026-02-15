@@ -8,10 +8,11 @@
 #include "lib/wait_queue.h"
 
 #define TASK_MAGIC 0x13973264       // for PCB safety
+#define NR_OPEN_DEFAULT 64
 
 typedef struct task_manager{
     spin_list_head_t all_list;
-    spin_lock_t id_lock;
+    spinlock_t id_lock;
     uint64_t next_free_id;
 } task_manager_t;
 
@@ -44,10 +45,15 @@ typedef struct pcb
     list_head_t child_list_item;
     list_head_t wait_list_item;
     wait_queue_t wait_queue;
+    int preempt_count;
     /* 定时器 */
     spin_list_head_t timers;
     uint32_t signal;
     uint32_t magic;
+    /* 文件系统 */
+    struct file *files[NR_OPEN_DEFAULT];
+    struct dentry *cwd;
+    
     enum task_state state;
     int exit_status;
 } pcb_t;
@@ -70,5 +76,11 @@ pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n);
 void schedule(void);
 void yield(void);
 void put_to_ready_list_first(pcb_t *task);
+static inline void preempt_disable(void) {
+    get_current()->preempt_count++;
+}
+static inline void preempt_enable(void) {
+    get_current()->preempt_count--;
+}
 
 #endif

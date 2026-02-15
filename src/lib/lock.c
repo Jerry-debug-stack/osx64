@@ -1,77 +1,56 @@
 #include "lib/safelist.h"
 #include "lib/io.h"
+#include "task.h"
 
 /* ====================== 自旋锁实现 ====================== */
 
 /* 自旋锁初始化 */
-void spin_lock_init(spin_lock_t *lock)
+void spin_lock_init(spinlock_t *lock)
 {
     lock->lock = 0;
 }
 
 /* 获取自旋锁（忙等待） */
-void spin_lock(spin_lock_t *lock)
+void spin_lock(spinlock_t *lock)
 {
+    preempt_disable();
+    while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
+        __asm__ __volatile__("pause");
+    }
+    __sync_synchronize();
+}
+
+/* 释放自旋锁 */
+void spin_unlock(spinlock_t *lock)
+{
+    /* 内存屏障 */
+    __sync_synchronize();
+    /* 原子释放 */
+    __sync_lock_release(&lock->lock);
+    preempt_enable();
+}
+
+/* 尝试获取自旋锁（非阻塞） */
+int spin_trylock(spinlock_t *lock)
+{
+    return !atomic_compare_exchange((uint32_t*)&lock->lock,0,1);
+}
+
+uint8_t spin_lock_irq_save(spinlock_t *lock){
     uint8_t intr = io_cli();
-    while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
-        __asm__ __volatile__("pause");
-    }
-    io_set_intr(intr);
-    __sync_synchronize();
-}
-
-/* 释放自旋锁 */
-void spin_unlock(spin_lock_t *lock)
-{
-    /* 内存屏障 */
-    __sync_synchronize();
-    /* 原子释放 */
-    __sync_lock_release(&lock->lock);
-}
-
-/* 尝试获取自旋锁（非阻塞） */
-int spin_trylock(spin_lock_t *lock)
-{
-    return !atomic_compare_exchange((uint32_t*)&lock->lock,0,1);
-}
-
-/* ====================== 可中断自旋锁实现 ====================== */
-
-/* 自旋锁初始化 */
-void spin_lock_int_able_init(spin_lock_int_able_t *lock)
-{
-    lock->lock = 0;
-}
-
-/* 获取自旋锁（忙等待） */
-void spin_lock_int_able(spin_lock_int_able_t *lock)
-{
+    preempt_disable();
     while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
         __asm__ __volatile__("pause");
     }
     __sync_synchronize();
-}
-
-/* 释放自旋锁 */
-void spin_int_able_unlock(spin_lock_int_able_t *lock)
-{
-    /* 内存屏障 */
-    __sync_synchronize();
-    /* 原子释放 */
-    __sync_lock_release(&lock->lock);
-}
-
-/* 尝试获取自旋锁（非阻塞） */
-int spin_int_able_trylock(spin_lock_int_able_t *lock)
-{
-    return !atomic_compare_exchange((uint32_t*)&lock->lock,0,1);
+    return intr;
 }
 
 /* ====================== 互斥锁实现 ====================== */
 
 /* 等待队列节点 */
 typedef struct wait_queue_entry {
-    struct task_struct *task;  // 等待的任务
+    pcb_t *task;  // 等待的任务
     list_head_t list;     // 链表节点
 } wait_queue_entry_t;
 
@@ -93,7 +72,7 @@ void mutex_lock(mutex_t *lock)
     
     /* 创建等待队列项 */
     wait_queue_entry_t wait;
-    //wait.task = current_task();  // 获取当前任务
+    wait.task = get_current();  // 获取当前任务
     
     /* 加入等待队列 */
     spin_lock(&lock->queue_lock);
@@ -102,17 +81,15 @@ void mutex_lock(mutex_t *lock)
         /* 添加到等待队列尾部 */
         list_add_tail(&wait.list, &lock->wait_queue);
         
-        ///@todo sleep!
-        /* 设置任务状态为睡眠 */
-        //task_set_state(wait.task, TASK_SLEEPING);
+        wait.task->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
         
         /* 释放队列锁并调度其他任务 */
         spin_unlock(&lock->queue_lock);
-        //schedule();
+        schedule();
         
         /* 被唤醒后，重新尝试获取锁 */
         while (__sync_lock_test_and_set(&lock->locked, 1)) {
-            //schedule();
+            schedule();
         }
     } else {
         /* 在这段时间内锁被释放了，直接获取 */
@@ -135,11 +112,7 @@ void mutex_unlock(mutex_t *lock)
         wait = list_first_entry(&lock->wait_queue, 
                                 struct wait_queue_entry, list);
         list_del(&wait->list);
-        
-        /* 唤醒任务 */
-        ///@todo wake!!!
-        //task_set_state(wait->task, TASK_RUNNING);
-        //schedule_task(wait->task);
+        put_to_ready_list_first(wait->task);
     }
     spin_unlock(&lock->queue_lock);
 }
@@ -171,7 +144,7 @@ void read_lock(rwlock_t *lock)
             break;
         }
         spin_unlock(&lock->lock);
-        //schedule();  // 让出CPU
+        yield();
     }
 }
 
@@ -194,7 +167,7 @@ void write_lock(rwlock_t *lock)
             break;
         }
         spin_unlock(&lock->lock);
-        //schedule();  // 让出CPU
+        yield();
     }
 }
 

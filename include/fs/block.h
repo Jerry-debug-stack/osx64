@@ -34,6 +34,7 @@ typedef struct partition
     uint64_t sector_count;
     uint8_t bootable;
     uint8_t part_type;
+    struct super_block *mounted_sb;
 } partition_t;
 
 typedef struct real_device
@@ -70,5 +71,8 @@ typedef struct {
     mbr_entry_t   entry[4];
     uint16_t      signature;
 } __attribute__((packed)) mbr_t;
+
+#define PARTITION_LINUX 0x83
+#define FS_TYPE_RAMFS  0x1001
 
 #endif

@@ -43,10 +43,7 @@ int block_register(block_device_t *dev)
         partition_t *partition = (partition_t *)dev;
         real_device_t *real_device = (real_device_t *)partition->parent;
         INIT_LIST_HEAD(&partition->childs_list_item);
-
-        spin_lock(&real_device->childs.lock);
-        list_add_tail(&partition->childs_list_item, &real_device->childs.list);
-        spin_unlock(&real_device->childs.lock);
+        spin_list_add_tail(&partition->childs_list_item, &real_device->childs);
         io_set_intr(intr);
     }
     return 0;
@@ -111,6 +108,7 @@ static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int ind
     part->sector_count = ent->sector_count;
     part->part_type    = ent->type;
     part->bootable     = ent->bootable;
+    part->mounted_sb   = NULL;
 
     part->device.type         = BLOCK_PARTITION;
     part->device.block_size   = disk->block_size;
@@ -173,6 +171,7 @@ static void scan_extended(block_device_t* disk,uint32_t ext_base_lba)
             part->sector_count = part_entry->sector_count;
             part->part_type    = part_entry->type;
             part->bootable     = part_entry->bootable;
+            part->mounted_sb   = NULL;
 
             part->device.type         = BLOCK_PARTITION;
             part->device.block_size   = disk->block_size;
@@ -194,7 +193,6 @@ static void scan_extended(block_device_t* disk,uint32_t ext_base_lba)
         current_ebr = ext_base_lba + next_ebr_relative;
     }
 }
-
 
 void read_partitions(void){
     list_head_t *pos;

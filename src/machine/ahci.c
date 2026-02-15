@@ -37,7 +37,7 @@ static void ahci_register_device(hba_mem_t *hba, int port_no)
             break;
     }
 
-    spin_lock_int_able_init(&d->lock);
+    spin_lock_init(&d->lock);
     ahci_mgr.count++;
     init_command_fis_list(hba,port_no);
     wb_printf("[ AHCI  ] registered device at port %d\n", port_no);
@@ -81,7 +81,7 @@ void ahci_kernel_thread(void)
             pcb_t *to_wake[32];
             int wakecnt = 0;
             
-            spin_lock_int_able(&dev->lock);
+            spin_lock(&dev->lock);
             for (int s = 0; s < 32; s++)
             {
                 ahci_request_t *req = dev->active[s];
@@ -118,7 +118,7 @@ void ahci_kernel_thread(void)
                           s,
                           req->waiter->cr3);
             }
-            spin_int_able_unlock(&dev->lock);
+            spin_unlock(&dev->lock);
             for (int k = 0; k < wakecnt; k++)
             {
                 pcb_t *task = to_wake[k];
@@ -143,7 +143,7 @@ int ahci_submit(ahci_device_t *dev, uint64_t lba, uint32_t count, void *buf, int
     req->waiter = get_current();
     req->finished = 0;
 
-    spin_lock_int_able(&dev->lock);
+    spin_lock(&dev->lock);
     // 入队
     if (!dev->req_head)
         dev->req_head = dev->req_tail = req;
@@ -153,7 +153,7 @@ int ahci_submit(ahci_device_t *dev, uint64_t lba, uint32_t count, void *buf, int
     }
     // 关键：在锁内标记睡眠
     req->waiter->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
-    spin_int_able_unlock(&dev->lock);
+    spin_unlock(&dev->lock);
     // condition wait
     while (!req->finished)
         schedule();

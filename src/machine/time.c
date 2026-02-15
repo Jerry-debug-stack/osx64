@@ -53,12 +53,16 @@ void timer_intr_soft(void){
     /* 调度请求标志 */
     bool need_schedule = true;
     /* step 1 处理本地时钟 */ 
-    uint32_t signal = local_timer_timeout(cpu);
+    UNUSED uint32_t signal = local_timer_timeout(cpu);
     /* step 2 分析负载均衡 */
     if ((ticks + id) & 64){
         load_balance(id);
     }
     /* step 3 考虑是否需要调度 */
+    pcb_t *current = cpu->now_running;
+    if (current->preempt_count){
+        need_schedule = false;
+    }
     /* 这里保留作以后处理 */
     __asm__ __volatile__("sti");
     /* 下半段 */
@@ -66,7 +70,6 @@ void timer_intr_soft(void){
     /* 结束段 */
     cpu->time_intr_reenter--;
     if (need_schedule){
-        pcb_t *current = cpu->now_running;
         if (current != cpu->idle){
             current->state = TASK_STATE_READY;
             spin_lock(&cpu->ready_list.lock);

@@ -74,7 +74,6 @@ extern uint64_t ptable4[512];
 static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
 {
     pcb_t *new_task = kmalloc(DEFAULT_PCB_SIZE);
-    memset(new_task, 0, DEFAULT_PCB_SIZE);
     INIT_LIST_HEAD(&new_task->all_list);
     INIT_LIST_HEAD(&new_task->child_list_item);
     INIT_LIST_HEAD(&new_task->other_list_item);
@@ -84,16 +83,19 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     spin_list_init(&new_task->timers);
     new_task->cr3 = (uint64_t)ptable4;
     new_task->cpuid = 0;
+    new_task->preempt_count = 0;
     /* pid */
     alloc_pid_and_add_to_all_list(new_task);
     /* parent */
     if (parent)
     {
+        new_task->cwd = parent->cwd;
         new_task->parent = parent;
         spin_list_add_tail(&new_task->child_list_item, &parent->childs);
     }
     else
     {
+        new_task->cwd = NULL;
         new_task->parent = NULL;
     }
     /* childs */
@@ -101,13 +103,16 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     /* name */
     if (name)
     {
-        uint32_t length = strlen(name);
+        uint32_t length = strlen((const char*)name);
         new_task->name = kmalloc(length + 1);
         strcpy(new_task->name, name);
     }
     else
     {
         new_task->name = NULL;
+    }
+    for (int i = 0; i < NR_OPEN_DEFAULT; i++){
+        new_task->files[i] = NULL;
     }
     new_task->is_ker = true;
     new_task->magic = TASK_MAGIC;
@@ -317,4 +322,14 @@ void ahci_kernel_thread(void);
 
 void put_ahci_thread(void){
     kernel_thread("ahci",ahci_kernel_thread,pcb_of_init,0);
+}
+
+void init_cwd_for_started_tasks(struct dentry *root){
+    preempt_disable();
+    list_head_t *pos;
+    spin_list_for_each(pos,&task_manager.all_list){
+        pcb_t *item = container_of(pos,pcb_t,all_list);
+        item->cwd = root;
+    }
+    preempt_enable();
 }

@@ -4,7 +4,7 @@
 #include "lib/safelist.h"
 
 typedef struct wait_queue {
-    spin_lock_t lock;
+    spinlock_t lock;
     list_head_t list;   // 等待中的任务
 } wait_queue_t;
 

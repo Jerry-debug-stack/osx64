@@ -9,39 +9,29 @@
 /* 自旋锁（用于短临界区，不可中断） */
 typedef struct {
     volatile uint32_t lock;
-} spin_lock_t;
-
-/* 简化自旋锁,可中断 */
-typedef struct {
-    volatile uint32_t lock;
-} spin_lock_int_able_t;
+} spinlock_t;
 
 /* 互斥锁（用于可能睡眠的长临界区） */
 typedef struct {
     volatile int locked;
     list_head_t wait_queue;  // 等待队列
-    spin_lock_t queue_lock;        // 等待队列锁
+    spinlock_t queue_lock;        // 等待队列锁
 } mutex_t;
 
 /* 读写锁（读多写少场景） */
 typedef struct {
     volatile int readers;
     volatile int writer;
-    spin_lock_t lock;
+    spinlock_t lock;
 } rwlock_t;
 
 
 /* 自旋锁操作 */
-void spin_lock_init(spin_lock_t *lock);
-void spin_lock(spin_lock_t *lock);
-void spin_unlock(spin_lock_t *lock);
-int spin_trylock(spin_lock_t *lock);
-
-/* 可中断自旋锁操作 */
-void spin_lock_int_able_init(spin_lock_int_able_t *lock);
-void spin_lock_int_able(spin_lock_int_able_t *lock);
-void spin_int_able_unlock(spin_lock_int_able_t *lock);
-int spin_int_able_trylock(spin_lock_int_able_t *lock);
+void spin_lock_init(spinlock_t *lock);
+void spin_lock(spinlock_t *lock);
+void spin_unlock(spinlock_t *lock);
+int spin_trylock(spinlock_t *lock);
+uint8_t spin_lock_irq_save(spinlock_t *lock);
 
 /* 互斥锁操作 */
 void mutex_init(mutex_t *lock);
@@ -59,7 +49,7 @@ void write_unlock(rwlock_t *lock);
 /* 带自旋锁的链表（最常用） */
 typedef struct spin_list_head {
     list_head_t list;
-    spin_lock_t lock;
+    spinlock_t lock;
 } spin_list_head_t;
 
 /* 带互斥锁的链表 */
