@@ -5,10 +5,12 @@
 #include "lib/safelist.h"
 #include "lib/atomic.h"
 
+#define DENTRY_CACHE_SIZE   1024
 #define MAX_NAME 128
 #define __user
 typedef int64_t ssize_t;
 typedef int64_t loff_t; 
+typedef loff_t off_t;
 
 typedef struct inode {
     uint64_t            ino;
@@ -51,38 +53,32 @@ typedef struct dentry {
     struct dentry_operations *dentry_ops;
     list_head_t         child_list;
     list_head_t         child_list_item;
+    /* cache计数 */
+    list_head_t         cache_list_item;
+    atomic_t            in_cache_list;
+    /* 标志位 */
     uint64_t            flags;
     /* 引用计数 */
     atomic_t            refcount;
     /* 状态 */
     bool                negative;      // name存在但inode不存在
-    struct mount       *mounted_here;
-    struct mount       *in_mnt;
+    bool                deleted;
+    struct super_block *mounted_here;
+    struct super_block *in_mnt;
     /* 锁 */
     spinlock_t          d_lock;
 } dentry_t;
 
 typedef struct super_block {
     int             fs_type;
-    atomic_t        active_ref;     // 活跃 inode / file 引用
-    bool            shutting_down;
-    /* inode列表 */
-    spin_list_head_t inode_list;
-    spin_list_head_t dentry_lru;
-    struct mount    *root_mount;
+    atomic_t        fs_ref;
     rwlock_t        sb_lock;
     struct super_operations *super_ops;
+    struct dentry   *root;          // 挂载根 dentry
+    struct dentry   *mountpoint;    // 挂载点 dentry（如果已挂载）
+    struct partition *part;         // 关联的分区（如果有）
+    list_head_t      mount_list;    // 全局挂载链表
 } super_block_t;
-
-typedef struct mount {
-    struct super_block   *sb;
-    struct dentry        *root;          // 挂载根
-    struct dentry        *mountpoint;    // 挂载点
-    atomic_t              refcount;
-    bool                  detached;
-    struct partition     *part;
-    list_head_t      mount_list;
-} mount_t;
 
 typedef struct file {
     struct inode   *inode;
@@ -91,7 +87,10 @@ typedef struct file {
     uint64_t        pos;
     atomic_t        refcount;
     int             flags;
+    mutex_t         lock;
 } file_t;
+
+#define ATTR_SIZE      0x0001
 
 typedef struct iattr {
     unsigned int ia_valid;   /* 哪些字段有效 */
@@ -144,7 +143,10 @@ typedef struct dentry_operations {
 typedef struct vfs_manager {
     spin_list_head_t mount_list;
     spin_list_head_t inode_list;
-    spin_list_head_t dentry_lru_list;
+    spin_list_head_t dentry_cache_list;
+    spin_list_head_t dentry_deleting_list;
+    mutex_t mount_lock;
+    atomic_t dentry_cache_num;
     rwlock_t namespace_lock;
     dentry_t *root;
 } vfs_manager_t;
@@ -159,11 +161,11 @@ static inline void inode_get(inode_t *inode)
 }
 static inline void sb_get(super_block_t *sb)
 {
-    atomic_inc(&sb->active_ref);
+    atomic_inc(&sb->fs_ref);
 }
 static inline void sb_put(super_block_t *sb)
 {
-    atomic_dec(&sb->active_ref);
+    atomic_dec(&sb->fs_ref);
 }
 dentry_t *dentry_create(const char *name,inode_t *inode);
 

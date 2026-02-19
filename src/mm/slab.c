@@ -154,7 +154,6 @@ void *slab_alloc(uint32_t size)
 
 void *kmalloc(uint32_t size)
 {
-    uint8_t intr = io_cli();
     spin_lock(&mm.lock);
     void *ret = slab_alloc(size);
     if (ret == NULL){
@@ -165,7 +164,6 @@ void *kmalloc(uint32_t size)
         }
     }
     spin_unlock(&mm.lock);
-    io_set_intr(intr);
     return ret;
 }
 
@@ -226,7 +224,6 @@ uint8_t slab_free(void *vir_addr){
 void kfree(void *vir_addr)
 {
     uint64_t addr = (uint64_t)vir_addr;
-    uint8_t intr = io_cli();
     spin_lock(&mm.lock);
     if (addr < VIRTUAL_ADDR_0){
         halt();
@@ -239,7 +236,6 @@ void kfree(void *vir_addr)
         }
     }
     spin_unlock(&mm.lock);
-    io_set_intr(intr);
 }
 
 uint64_t mem_linear2phy(uint64_t addr, uint64_t cr3)

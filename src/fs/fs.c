@@ -6,17 +6,19 @@
 #include "view/view.h"
 #include "const.h"
 #include "task.h"
-#include "fcntl.h"
+#include "fs/fcntl.h"
 
 #include "fs/ramfs.h"
 
 void init_block(void);
 
-extern void init_cwd_for_started_tasks(struct dentry *root);
+extern int init_cwd_for_started_tasks(struct dentry *root);
 
 static inline void init_vfs_mgr(void);
-static dentry_t *lookup_child(dentry_t *parent, const char *name);
 static inline void mount_root_ramfs(void);
+
+static void dentry_cache_task(void);
+static void dentry_free_task(void);
 
 struct file *vfs_open(const char *path, int flags, int mode);
 ssize_t vfs_read(struct file *file, char *buf, size_t count);
@@ -27,43 +29,37 @@ int sys_open(const char *path, int flags, int mode);
 ssize_t sys_read(int fd, char *buf, size_t count);
 ssize_t sys_write(int fd, const char *buf, size_t count);
 int sys_close(int fd);
+off_t sys_lseek(int fd, off_t offset, int whence);
+int sys_mkdir(const char *path, int mode);
+int sys_rmdir(const char *path);
+int sys_unlink(const char *path);
+int sys_chdir(const char *path);
+int sys_ftruncate(int fd, off_t length);
+int sys_truncate(const char *path, off_t length);
 
 vfs_manager_t vfs_mgr;
 
-void test_filesystem(void)
-{
-    int fd = sys_open("/test.txt", O_CREAT | O_RDWR, 0644);
-    if (fd < 0) {
-        wb_printf("test: open failed\n");
-        return;
-    }
-    const char *msg = "Hello, VFS!";
-    sys_write(fd, msg, strlen(msg));
-    sys_close(fd);
-    fd = sys_open("/test.txt", O_RDWR, 0644);
-    if (fd < 0) {
-        wb_printf("test: open failed\n");
-        return;
-    }
-    char buf[128];
-    sys_read(fd, buf, sizeof(buf));
-    wb_printf("test: read: %s\n", buf);
-    sys_close(fd);
-}
+void test_filesystem(void){}
 
 void init_fs_mem(void){
     init_block();
     init_vfs_mgr();
     test_filesystem();
+    kernel_thread("fs_cache",dentry_cache_task,pcb_of_init,0);
+    kernel_thread("fs_free",dentry_free_task,pcb_of_init,0);
 }
 
 static inline void init_vfs_mgr(void){
     spin_list_init(&vfs_mgr.inode_list);
     spin_list_init(&vfs_mgr.mount_list);
-    spin_list_init(&vfs_mgr.dentry_lru_list);
+    spin_list_init(&vfs_mgr.dentry_cache_list);
+    spin_list_init(&vfs_mgr.dentry_deleting_list);
+    atomic_set(&vfs_mgr.dentry_cache_num,0);
     rwlock_init(&vfs_mgr.namespace_lock);
     mount_root_ramfs();
-    init_cwd_for_started_tasks(vfs_mgr.root);
+    int total_ref = init_cwd_for_started_tasks(vfs_mgr.root);
+    atomic_add(total_ref,&vfs_mgr.root->refcount);
+    atomic_add(total_ref,&vfs_mgr.root->in_mnt->fs_ref);
 }
 
 static inline void mount_root_ramfs(void)
@@ -94,72 +90,128 @@ static inline void mount_root_ramfs(void)
         wb_printf("mount_root_ramfs: failed to create root dentry\n");
         halt();
     }
+    sb_get(sb);
     dentry_get(root_dentry);
     vfs_mgr.root = root_dentry;
     wb_printf("[  VFS  ] Ramfs mounted as root (root ino=%d)\n", root_inode->ino);
 }
 
-dentry_t *__vfs_lookup_locked(dentry_t *start,const char *target_path)
+dentry_t *__vfs_lookup_locked(dentry_t *start, const char *target_path)
 {
     if (!target_path || target_path[0] == '\0')
         return NULL;
 
     dentry_t *current;
+    char *path_copy;
+    char *saveptr;
+    char *token;
 
-    /* 绝对路径 */
-    if (target_path[0] == '/' || start == NULL)
-        current = vfs_mgr.root;
-    else
-        current = start;   /* 相对路径 */
-
-    const char *p = target_path;
-
-    while (*p) {
-
-        while (*p == '/')
-            p++;
-
-        if (*p == '\0')
-            break;
-
-        char name[256];
-        int len = 0;
-
-        while (*p && *p != '/') {
-            if (len < 255)
-                name[len++] = *p;
-            p++;
-        }
-        name[len] = '\0';
-
-        /* "." */
-        if (strcmp((const char*)name, ".") == 0)
-            continue;
-
-        /* ".." */
-        if (strcmp((const char*)name, "..") == 0) {
-            if (current->in_mnt && current == current->in_mnt->root) {
-                if (current->in_mnt->mountpoint)
-                    current = current->in_mnt->mountpoint;
-            } else if (current->parent) {
-                current = current->parent;
-            }
-            continue;
-        }
-
-        dentry_t *child = lookup_child(current, name);
-        if (!child)
-            return NULL;
-
-        /* mount 跳转 */
-        if (child->flags & DENTRY_FLAG_MOUNTPOINT)
-            current = child->mounted_here->root;
-        else
-            current = child;
+    if (target_path[0] == '/'){
+        current = vfs_mgr.root;    
+    } else{
+        current = (start) ? start : vfs_mgr.root;
     }
-    if (current)
-        dentry_get(current);
-    return current;
+
+    dentry_get(current);   // 增加查找者引用
+
+    path_copy = kstrdup(target_path);
+    if (!path_copy) {
+        dentry_put(current);
+        return NULL;
+    }
+
+    token = strtok_r(path_copy, "/", &saveptr);
+    while (token) {
+        dentry_t *next = NULL;
+        inode_t *current_inode = current->inode;
+
+        // 处理 "." 和 ".."
+        if (strcmp(token, ".") == 0) {
+            next = current;
+            dentry_get(next);   // 查找者引用
+            goto next_token;
+        }
+        if (strcmp(token, "..") == 0) {
+            if (current->parent) {
+                next = current->parent;
+                dentry_get(next);   // 查找者引用
+            } else {
+                next = current;
+                dentry_get(next);
+            }
+            goto next_token;
+        }
+
+        // 读锁查找 child_list
+        read_lock(&current_inode->i_meta_lock);
+        struct list_head *pos;
+        list_for_each(pos, &current->child_list) {
+            dentry_t *child = container_of(pos, dentry_t, child_list_item);
+            if (strcmp(child->name, token) == 0) {
+                next = child;
+                dentry_get(next);   // 查找者引用
+                break;
+            }
+        }
+        read_unlock(&current_inode->i_meta_lock);
+
+        if (next)
+            goto next_token;
+
+        // 未找到，调用底层 lookup
+        if (!current_inode->inode_ops || !current_inode->inode_ops->lookup) {
+            dentry_put(current);
+            kfree(path_copy);
+            return NULL;
+        }
+
+        dentry_t *tmp = dentry_create(token, NULL);  // refcount = 1 (缓存持有)
+        if (!tmp) {
+            dentry_put(current);
+            kfree(path_copy);
+            return NULL;
+        }
+
+        int err = current_inode->inode_ops->lookup(current_inode, tmp);
+        if (err != 0) {
+            dentry_put(tmp);   // 释放临时 dentry (缓存引用)
+            dentry_put(current);
+            kfree(path_copy);
+            return NULL;
+        }
+
+        // lookup 成功，tmp->inode 已设置
+        write_lock(&current_inode->i_meta_lock);
+        // 再次检查是否已被其他线程插入
+        list_for_each(pos, &current->child_list) {
+            dentry_t *child = container_of(pos, dentry_t, child_list_item);
+            if (strcmp(child->name, token) == 0) {
+                next = child;
+                dentry_get(next);   // 查找者引用
+                dentry_put(tmp);    // 释放临时 dentry (缓存引用)
+                break;
+            }
+        }
+        if (!next) {
+            // 插入新 dentry
+            dentry_get(current);   // 子 dentry 持有父目录引用
+            tmp->parent = current;
+            list_add_tail(&tmp->child_list_item, &current->child_list);
+            next = tmp;
+            // 注意：不要释放 tmp，因为缓存仍然持有它
+        }
+        write_unlock(&current_inode->i_meta_lock);
+
+        // 如果 next 是已有的 child，tmp 已经被释放；如果 next 是 tmp，tmp 的 refcount 现在为 2，不需要额外操作
+
+next_token:
+        dentry_put(current);   // 释放上一级的查找者引用
+        current = next;
+        token = strtok_r(NULL, "/", &saveptr);
+    }
+
+    kfree(path_copy);
+    return current;   // 返回的 current 包含查找者引用
 }
 
 dentry_t *vfs_lookup(dentry_t *start,const char *target_path){
@@ -179,11 +231,7 @@ super_block_t *super_block_create(partition_t *device,int fstype){
     }else{
         sb->fs_type = fstype;
     }
-    atomic_set(&sb->active_ref, 1);
-    sb->shutting_down = false;
-    spin_list_init(&sb->inode_list);
-    spin_list_init(&sb->dentry_lru);
-    sb->root_mount = NULL;
+    atomic_set(&sb->fs_ref, 0);
     rwlock_init(&sb->sb_lock);
     sb->super_ops = NULL;
     return sb;
@@ -230,40 +278,46 @@ dentry_t *dentry_create(const char *name,inode_t *inode){
     d->in_mnt = NULL;
     d->mounted_here = NULL;
     d->negative = false;
+    d->deleted = false;
 
     INIT_LIST_HEAD(&d->child_list);
     INIT_LIST_HEAD(&d->child_list_item);
+    INIT_LIST_HEAD(&d->cache_list_item);
 
     atomic_set(&d->refcount, 1);
+    atomic_set(&d->in_cache_list,0);
 
     // 🔑 dentry 持有 inode
     if (inode){
         d->inode = inode;
-        atomic_inc(&inode->refcount);
+        inode_get(inode);
     }
     return d;
 }
 
-/// @warning with namespace lock
-void dentry_put(dentry_t *dentry){
-    if (!dentry)
-        return;
-    if (!atomic_dec_and_test(&dentry->refcount))
-        return;
-    if (dentry->parent) {
-        inode_t *parent_inode = dentry->parent->inode;
-
-        write_lock(&parent_inode->i_meta_lock);
-        list_del(&dentry->child_list_item);
-        write_unlock(&parent_inode->i_meta_lock);
-        dentry_put(dentry->parent);
+void dentry_put(dentry_t *dentry)
+{
+    if (!dentry) return;
+    if (atomic_dec_and_test(&dentry->refcount)) {
+        if (dentry->deleted){
+            if (dentry->parent){
+                dentry_put(dentry->parent);
+            }
+            spin_list_add(&dentry->cache_list_item,&vfs_mgr.dentry_deleting_list);
+        }else{
+            if (!atomic_test_and_set_bit(0, &dentry->in_cache_list)) {
+                spin_lock(&vfs_mgr.dentry_cache_list.lock);
+                // 再次检查计数（可能被并发 get 增加）
+                if (atomic_read(&dentry->refcount) == 0) {
+                    list_add_tail(&dentry->cache_list_item, &vfs_mgr.dentry_cache_list.list);
+                    atomic_inc(&vfs_mgr.dentry_cache_num);
+                } else {
+                    atomic_set(&dentry->in_cache_list,0);
+                }
+                spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+            }
+        }
     }
-    if (dentry->inode) {
-        inode_put(dentry->inode);
-    }
-    if (dentry->name)
-        kfree(dentry->name);
-    kfree(dentry);
 }
 
 void inode_put(inode_t *inode){
@@ -287,8 +341,7 @@ void inode_put(inode_t *inode){
 static int super_block_destroy(super_block_t *sb){
     if (!sb)
         return -1;
-    sb->shutting_down = true;
-    if (atomic_read(&sb->active_ref) != 0) {
+    if (atomic_read(&sb->fs_ref) != 0) {
         return -1;
     }
     if (sb->super_ops && sb->super_ops->put_super)
@@ -303,9 +356,9 @@ int vfs_mount(partition_t *part, const char *target_path, int fstype)
     super_block_t *sb = NULL;
     inode_t *root_inode = NULL;
     dentry_t *root = NULL;
-    mount_t *mnt = NULL;
     int ret = -1;
 
+    mutex_lock(&vfs_mgr.mount_lock);
     write_lock(&vfs_mgr.namespace_lock);
 
     mountpoint = __vfs_lookup_locked(NULL, target_path);
@@ -358,35 +411,24 @@ int vfs_mount(partition_t *part, const char *target_path, int fstype)
         goto out_put_inode;
     }
 
-    mnt = kmalloc(sizeof(mount_t));
-    if (!mnt) {
-        wb_printf("vfs_mount: no memory for mount\n");
-        goto out_put_root;
-    }
-    memset(mnt, 0, sizeof(mount_t));
-    mnt->sb = sb;
-    mnt->root = root;
-    mnt->mountpoint = mountpoint;
-    atomic_set(&mnt->refcount, 1);
-    mnt->detached = false;
-    mnt->part = part;   // 可能为 NULL
+    sb->root = root;
+    sb->mountpoint = mountpoint;
+    sb->part = part;   // 可能为 NULL
 
     spin_lock(&mountpoint->d_lock);
     mountpoint->flags |= DENTRY_FLAG_MOUNTPOINT;
-    mountpoint->mounted_here = mnt;
+    mountpoint->mounted_here = sb;
     spin_unlock(&mountpoint->d_lock);
 
     if (part)
         part->mounted_sb = sb;
 
-    list_add_tail(&mnt->mount_list, &vfs_mgr.mount_list.list);
+    list_add_tail(&sb->mount_list, &vfs_mgr.mount_list.list);
 
     ret = 0;
     write_unlock(&vfs_mgr.namespace_lock);
     return 0;
 
-out_put_root:
-    dentry_put(root);
 out_put_inode:
     inode_put(root_inode);
 out_destroy_sb:
@@ -395,18 +437,79 @@ out_put_mountpoint:
     dentry_put(mountpoint);
 out_unlock:
     write_unlock(&vfs_mgr.namespace_lock);
+    mutex_unlock(&vfs_mgr.mount_lock);
     return ret;
 }
 
-static dentry_t *lookup_child(dentry_t *parent, const char *name)
+int vfs_umount(const char *target_path)
 {
-    struct list_head *pos;
-    list_for_each(pos, &parent->child_list) {
-        dentry_t *child = container_of(pos, dentry_t, child_list_item);
-        if (strcmp((const char*)child->name, name) == 0)
-            return child;
+    dentry_t *mountpoint = NULL;
+    super_block_t *sb = NULL;
+    int ret = -1;
+
+    // 全程持有 namespace 写锁，保证卸载过程原子性
+    mutex_lock(&vfs_mgr.mount_lock);
+    write_lock(&vfs_mgr.namespace_lock);
+
+    // 查找挂载点 dentry（从根开始）
+    mountpoint = __vfs_lookup_locked(vfs_mgr.root, target_path);
+    if (!mountpoint) {
+        goto out_unlock;
     }
-    return NULL;
+
+    // 检查是否为挂载点
+    if (!(mountpoint->flags & DENTRY_FLAG_MOUNTPOINT)) {
+        goto out_put_mountpoint;
+    }
+
+    sb = mountpoint->mounted_here;
+    if (!sb) {
+        // 标志位异常
+        mountpoint->flags &= ~DENTRY_FLAG_MOUNTPOINT;
+        goto out_put_mountpoint;
+    }
+
+    // 检查文件系统是否可卸载（fs_ref == 0）
+    if (atomic_read(&sb->fs_ref) != 0) {
+        // 仍有活跃引用，返回 EBUSY
+        goto out_put_mountpoint;
+    }
+
+    // 从全局挂载链表中移除
+    list_del(&sb->mount_list);
+
+    // 清除挂载点 dentry 的标志和指针（需要保护 dentry 锁）
+    spin_lock(&mountpoint->d_lock);
+    mountpoint->flags &= ~DENTRY_FLAG_MOUNTPOINT;
+    mountpoint->mounted_here = NULL;
+    spin_unlock(&mountpoint->d_lock);
+
+    // 释放 super_block 持有的挂载点 dentry 引用（来自挂载时的保存）
+    if (sb->mountpoint) {
+        dentry_put(sb->mountpoint);
+        sb->mountpoint = NULL;
+    }
+
+    // 释放 super_block 的根 dentry 引用
+    if (sb->root) {
+        dentry_put(sb->root);
+        sb->root = NULL;
+    }
+
+    // 销毁 super_block（会调用 put_super 并释放内存）
+    super_block_destroy(sb);
+
+    // 释放查找时获得的挂载点 dentry 引用
+    dentry_put(mountpoint);
+    write_unlock(&vfs_mgr.namespace_lock);
+    return 0;
+
+out_put_mountpoint:
+    dentry_put(mountpoint);
+out_unlock:
+    write_unlock(&vfs_mgr.namespace_lock);
+    mutex_unlock(&vfs_mgr.mount_lock);
+    return ret;
 }
 
 // 分配一个空闲的文件描述符，返回 fd，若没有可用则返回 -1
@@ -442,7 +545,6 @@ int fd_close(pcb_t *proc, int fd)
     if (!file)
         return -1;  // EBADF
     proc->files[fd] = NULL;
-    return -1;
     return vfs_close(file);  // 假设 vfs_close 释放 file 结构并返回 0 成功
 }
 
@@ -450,6 +552,7 @@ void dentry_set_parent(dentry_t *parent,dentry_t *child){
     if (!parent||!child)
         return;
     dentry_get(parent);
+    child->parent = parent;
     write_lock(&parent->inode->i_meta_lock);
     list_add(&child->child_list_item,&parent->child_list);
     write_unlock(&parent->inode->i_meta_lock);
@@ -600,8 +703,6 @@ struct file *vfs_open(const char *path, int flags, int mode)
         dentry_put(parent);
         return NULL;
     }
-    dentry_get(parent); // dentry 持有 parent 引用
-    dentry->parent = parent;
 
     // 调用父目录的 create 方法
     if (!parent->inode->inode_ops || !parent->inode->inode_ops->create) {
@@ -635,6 +736,7 @@ found:
     file->inode = dentry->inode;
     file->pos = (flags & O_APPEND) ? dentry->inode->size : 0;
     file->flags = flags;
+    mutex_init(&file->lock);
     atomic_set(&file->refcount, 1);
     file->file_ops = dentry->inode->default_file_ops;
     if (!file->file_ops) {
@@ -660,14 +762,22 @@ ssize_t vfs_read(struct file *file, char *buf, size_t count)
 {
     if (!file || !file->file_ops || !file->file_ops->read)
         return -1;
-    return file->file_ops->read(file, buf, count, (int64_t*)&file->pos);
+    read_lock(&file->inode->i_meta_lock);
+    ssize_t ret = file->file_ops->read(file, buf, count, (int64_t*)&file->pos);
+    read_unlock(&file->inode->i_meta_lock);
+    return ret;
 }
 
 ssize_t vfs_write(struct file *file, const char *buf, size_t count)
 {
     if (!file || !file->file_ops || !file->file_ops->write)
         return -1;
-    return file->file_ops->write(file, buf, count, (int64_t*)&file->pos);
+    mutex_lock(&file->lock);
+    read_lock(&file->inode->i_meta_lock);
+    ssize_t ret = file->file_ops->write(file, buf, count, (int64_t*)&file->pos);
+    read_unlock(&file->inode->i_meta_lock);
+    mutex_unlock(&file->lock);
+    return ret;
 }
 
 int vfs_close(struct file *file)
@@ -677,16 +787,102 @@ int vfs_close(struct file *file)
     if (!atomic_dec_and_test(&file->refcount))
         return 0;  // 还有其他引用
 
+    super_block_t *sb = file->dentry->in_mnt;
+
     // 调用 release 方法
     if (file->file_ops && file->file_ops->release)
         file->file_ops->release(file->inode, file);
 
-    // 释放 dentry 引用
+    // 释放 dentry,inode 引用
+    if (file->inode)
+        inode_put(file->inode);
     dentry_put(file->dentry);
+
+    // 释放fs_ref
+    sb_put(sb);
 
     // 释放 file 结构自身
     kfree(file);
+
     return 0;
+}
+
+static inline void dentry_free(dentry_t *dentry){
+    if (dentry->inode) {
+        inode_put(dentry->inode);
+    }
+    if (dentry->name)
+        kfree(dentry->name);
+    kfree(dentry);
+}
+
+static void dentry_cache_task(void)
+{
+    while (1) {
+        dentry_t *dentry;
+        // 从队列取出（已移出）
+        spin_lock(&vfs_mgr.dentry_cache_list.lock);
+        if (atomic_read(&vfs_mgr.dentry_cache_num) <= DENTRY_CACHE_SIZE) {
+            spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+            yield();
+            continue;
+        }
+        dentry = list_first_entry(&vfs_mgr.dentry_cache_list.list, dentry_t, cache_list_item);
+        list_del_init(&dentry->cache_list_item);
+        spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+
+        // 获取父目录锁（若存在）
+        inode_t *parent_inode = dentry->parent ? dentry->parent->inode : NULL;
+        if (parent_inode)
+            write_lock(&parent_inode->i_meta_lock);
+
+        // 循环处理，应对并发释放
+        while (1) {
+            int ref = atomic_read(&dentry->refcount);
+            if (ref == 0) {
+                // 安全释放
+                if (parent_inode) {
+                    list_del_init(&dentry->child_list_item);
+                    dentry_put(dentry->parent);  // 释放父目录引用
+                }
+                atomic_dec(&vfs_mgr.dentry_cache_num);
+                if (parent_inode)
+                    write_unlock(&parent_inode->i_meta_lock);
+                dentry_free(dentry);
+                break;  // 结束
+            } else {
+                // 需要放回队列
+                spin_lock(&vfs_mgr.dentry_cache_list.lock);
+                // 再次检查计数（可能在拿锁期间变化）
+                if (atomic_read(&dentry->refcount) == 0) {
+                    spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+                    continue;  // 重新检查，走释放路径
+                }
+                // 仍非0，放回队列（标志已为true，无需改）
+                list_add_tail(&dentry->cache_list_item, &vfs_mgr.dentry_cache_list.list);
+                spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+                if (parent_inode)
+                    write_unlock(&parent_inode->i_meta_lock);
+                break;  // 结束，等待下次处理
+            }
+        }
+    }
+}
+
+static void dentry_free_task(void){
+    while (1)
+    {
+        spin_lock(&vfs_mgr.dentry_deleting_list.lock);
+        if (list_empty(&vfs_mgr.dentry_deleting_list.list)){
+            spin_unlock(&vfs_mgr.dentry_deleting_list.lock);
+            yield();
+            continue;
+        }
+        list_head_t *temp = vfs_mgr.dentry_deleting_list.list.next;
+        list_del(temp);
+        spin_unlock(&vfs_mgr.dentry_deleting_list.lock);
+        dentry_free(container_of(temp,dentry_t,cache_list_item));
+    }
 }
 
 int sys_open(const char *path, int flags, int mode)
@@ -701,6 +897,7 @@ int sys_open(const char *path, int flags, int mode)
         vfs_close(file);
         return -1;
     }
+    sb_get(file->dentry->in_mnt);
     fd_install(current, fd, file);
     return fd;
 }
@@ -728,3 +925,444 @@ int sys_close(int fd)
     pcb_t *current = get_current();
     return fd_close(current, fd);
 }
+
+off_t sys_lseek(int fd, off_t offset, int whence)
+{
+    pcb_t *current = get_current();
+    struct file *file = fd_get(current, fd);
+    off_t new_pos;
+    inode_t *inode;
+
+    if (!file)
+        return -1;
+
+    mutex_lock(&file->lock);
+    inode = file->inode;
+
+    // 根据 whence 计算新位置
+    switch (whence) {
+    case SEEK_SET:
+        new_pos = offset;
+        break;
+    case SEEK_CUR:
+        new_pos = file->pos + offset;
+        break;
+    case SEEK_END:
+        new_pos = inode->size + offset;
+        break;
+    default:
+        return -1;
+    }
+
+    // 检查新位置是否有效（不能为负）
+    if (new_pos < 0)
+        return -1;
+
+    // 更新文件位置
+    file->pos = new_pos;
+    mutex_unlock(&file->lock);
+    return new_pos;
+}
+
+int sys_mkdir(const char *path, int mode)
+{
+    dentry_t *start = NULL;
+    dentry_t *parent = NULL;
+    dentry_t *dentry = NULL;
+    char *parent_path = NULL;
+    const char *name;
+    pcb_t *current = get_current();
+    int ret = -1;
+
+    if (!path || path[0] == '\0')
+        return -1;
+
+    write_lock(&vfs_mgr.namespace_lock);
+
+    // 确定起始 dentry
+    if (path[0] == '/') {
+        start = vfs_mgr.root;
+        dentry_get(start);
+    } else {
+        start = current->cwd;
+        dentry_get(start);
+    }
+
+    // 先尝试查找，若存在则返回错误
+    dentry = __vfs_lookup_locked(start, path);
+    if (dentry) {
+        dentry_put(dentry);
+        ret = -1;   // EEXIST
+        goto out_put_start;
+    }
+
+    // 分割路径，获取父目录路径和最后一层名称
+    if (split_path(path, &parent_path, &name) < 0)
+        goto out_put_start;
+
+    // 不允许以 "." 或 ".." 作为新目录名
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        kfree(parent_path);
+        goto out_put_start;
+    }
+
+    // 查找父目录
+    if (parent_path[0] == '\0') {
+        parent = start;
+        dentry_get(parent);   // 增加临时引用，统一释放
+    } else {
+        parent = __vfs_lookup_locked(start, parent_path);
+        if (!parent) {
+            kfree(parent_path);
+            goto out_put_start;
+        }
+    }
+    kfree(parent_path);
+
+    // 检查父目录是否为目录
+    if (!S_ISDIR(parent->inode->mode)) {
+        dentry_put(parent);
+        goto out_put_start;
+    }
+
+    // 创建临时 dentry（尚未关联 inode）
+    dentry = dentry_create(name, NULL);
+    if (!dentry) {
+        dentry_put(parent);
+        goto out_put_start;
+    }
+
+    // 调用具体文件系统的 mkdir 方法
+    if (!parent->inode->inode_ops || !parent->inode->inode_ops->mkdir) {
+        dentry_put(dentry);
+        dentry_put(parent);
+        goto out_put_start;
+    }
+    ret = parent->inode->inode_ops->mkdir(parent->inode, dentry, mode);
+    if (ret < 0) {
+        dentry_put(dentry);
+        dentry_put(parent);
+        goto out_put_start;
+    }
+
+    // mkdir 成功，将 dentry 加入父目录的 child_list，并建立引用关系
+    dentry_set_parent(parent, dentry);
+
+    // 释放临时创建的 dentry 引用（现在由父目录持有）
+    dentry_put(dentry);
+    // 释放父目录临时引用
+    dentry_put(parent);
+    // 释放起始点引用
+    dentry_put(start);
+    write_unlock(&vfs_mgr.namespace_lock);
+    return 0;
+
+out_put_start:
+    if (start) dentry_put(start);
+    write_unlock(&vfs_mgr.namespace_lock);
+    return ret;
+}
+
+int sys_rmdir(const char *path)
+{
+    dentry_t *start = NULL;
+    dentry_t *parent = NULL;
+    dentry_t *dentry = NULL;
+    pcb_t *current = get_current();
+    int ret = -1;
+
+    if (!path || path[0] == '\0')
+        return -1;
+
+    write_lock(&vfs_mgr.namespace_lock);
+
+    // 确定起始 dentry
+    if (path[0] == '/') {
+        start = vfs_mgr.root;
+        dentry_get(start);
+    } else {
+        start = current->cwd;
+        dentry_get(start);
+    }
+
+    // 查找目标 dentry
+    dentry = __vfs_lookup_locked(start, path);
+    if (!dentry) {
+        goto out_put_start;  // 不存在
+    }
+
+    // 检查是否为目录
+    if (!S_ISDIR(dentry->inode->mode)) {
+        goto out_put_dentry;  // ENOTDIR
+    }
+
+    // 获取父目录
+    parent = dentry->parent;
+    if (!parent) {
+        // 根目录不能删除
+        goto out_put_dentry;
+    }
+    dentry_get(parent);  // 临时引用
+
+    // 检查目录是否为空（通过父目录的锁保护 child_list 的遍历）
+    write_lock(&parent->inode->i_meta_lock);
+    bool empty = list_empty(&dentry->child_list);
+    write_unlock(&parent->inode->i_meta_lock);
+    if (!empty) {
+        ret = -1;  // ENOTEMPTY
+        goto out_put_parent;
+    }
+
+    // 检查目录不能是挂载点
+    if (dentry->flags & DENTRY_FLAG_MOUNTPOINT) {
+        ret = -1;  // EBUSY
+        goto out_put_parent;
+    }
+
+    if (atomic_read(&dentry->refcount) != 1){
+        ret = -1;
+        goto out_put_parent;
+    }
+
+    // 调用具体文件系统的 rmdir 方法
+    if (!parent->inode->inode_ops || !parent->inode->inode_ops->rmdir) {
+        goto out_put_parent;
+    }
+    ret = parent->inode->inode_ops->rmdir(parent->inode, dentry);
+    if (ret < 0)
+        goto out_put_parent;
+
+    // 从父目录的 child_list 中移除该 dentry
+    write_lock(&parent->inode->i_meta_lock);
+    list_del_init(&dentry->child_list_item);
+    write_unlock(&parent->inode->i_meta_lock);
+
+    // 释放 dentry 持有的父目录引用（来自 dentry_set_parent）
+    dentry_put(parent);
+    // 释放起始点引用
+    dentry_put(start);
+    write_unlock(&vfs_mgr.namespace_lock);
+
+    dentry->deleted = true;
+
+    spin_lock(&vfs_mgr.dentry_cache_list.lock);
+    if (atomic_read(&dentry->in_cache_list)){
+        atomic_dec(&vfs_mgr.dentry_cache_num);
+        list_del(&dentry->cache_list_item);
+    }
+    spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+    // 释放查找过程中获得的 dentry 引用
+    dentry_put(dentry);
+    return 0;
+
+out_put_parent:
+    dentry_put(parent);
+out_put_dentry:
+    dentry_put(dentry);
+out_put_start:
+    dentry_put(start);
+    write_unlock(&vfs_mgr.namespace_lock);
+    return ret;
+}
+
+int sys_unlink(const char *path)
+{
+    dentry_t *dentry = NULL;
+    dentry_t *parent = NULL;
+    dentry_t *start = NULL;
+    pcb_t *current = get_current();
+    int ret = -1;
+
+    if (!path || path[0] == '\0')
+        return -1;
+
+    // 全程持有 namespace 写锁，保证路径解析和删除的原子性
+    write_lock(&vfs_mgr.namespace_lock);
+
+    // 确定起始 dentry（根或当前工作目录）
+    if (path[0] == '/')
+        start = vfs_mgr.root;
+    else
+        start = current->cwd;
+    dentry_get(start);  // 临时引用，防止被释放
+
+    // 使用 __vfs_lookup_locked 在锁保护下查找目标 dentry
+    dentry = __vfs_lookup_locked(start, path);
+    if (!dentry) {
+        dentry_put(start);
+        write_unlock(&vfs_mgr.namespace_lock);
+        return -1;  // 文件不存在
+    }
+
+    // 检查是否为目录（目录应由 rmdir 处理）
+    if (S_ISDIR(dentry->inode->mode)) {
+        dentry_put(dentry);
+        dentry_put(start);
+        write_unlock(&vfs_mgr.namespace_lock);
+        return -1;  // EISDIR
+    }
+
+    // 获取父目录（dentry->parent 在锁保护下稳定）
+    parent = dentry->parent;
+    if (!parent) {
+        // 理论上不会发生（根目录不会被删除）
+        dentry_put(dentry);
+        dentry_put(start);
+        write_unlock(&vfs_mgr.namespace_lock);
+        return -1;
+    }
+    dentry_get(parent);  // 临时引用，后面要用
+
+    // 调用具体文件系统的 unlink 方法
+    if (!parent->inode->inode_ops || !parent->inode->inode_ops->unlink) {
+        ret = -1;
+        goto out;
+    }
+    ret = parent->inode->inode_ops->unlink(parent->inode, dentry);
+    if (ret < 0)
+        goto out;
+
+    // 从父目录的 child_list 中移除该 dentry（需要父目录 inode 的锁）
+    write_lock(&parent->inode->i_meta_lock);
+    list_del_init(&dentry->child_list_item);  // 从链表移除
+    write_unlock(&parent->inode->i_meta_lock);
+
+    dentry_put(parent);  // 对应 dentry_set_parent 时增加的引用
+    dentry_put(start);
+
+    write_unlock(&vfs_mgr.namespace_lock);
+
+    dentry->deleted = true;
+
+    spin_lock(&vfs_mgr.dentry_cache_list.lock);
+    if (atomic_read(&dentry->in_cache_list)){
+        atomic_dec(&vfs_mgr.dentry_cache_num);
+        list_del(&dentry->cache_list_item);
+    }
+    spin_unlock(&vfs_mgr.dentry_cache_list.lock);
+    // 释放查找过程中获得的 dentry 引用
+    dentry_put(dentry);
+    return 0;
+
+out:
+    // 错误处理：释放临时引用
+    if (parent) dentry_put(parent);
+    dentry_put(dentry);
+    dentry_put(start);
+    write_unlock(&vfs_mgr.namespace_lock);
+    return ret;
+}
+
+int sys_chdir(const char *path)
+{
+    dentry_t *dentry;
+    pcb_t *current = get_current();
+
+    dentry = vfs_lookup(current->cwd, path);
+    if (!dentry) {
+        return -1;
+    }
+
+    if (!S_ISDIR(dentry->inode->mode)) {
+        dentry_put(dentry);
+        return -1;
+    }
+
+    sb_get(dentry->in_mnt);
+    sb_put(current->cwd->in_mnt);
+
+    dentry_put(current->cwd);
+    current->cwd = dentry;
+
+    return 0;
+}
+
+int sys_ftruncate(int fd, off_t length)
+{
+    pcb_t *current = get_current();
+    struct file *file = fd_get(current, fd);
+    if (!file)
+        return -1;
+
+    // 检查写入权限（根据打开模式）
+    if ((file->flags & O_ACCMODE) == O_RDONLY)
+        return -1;  // 只读文件不可截断
+
+    inode_t *inode = file->inode;
+    if (!inode->inode_ops || !inode->inode_ops->setattr)
+        return -1;
+
+    // 准备属性
+    struct iattr attr;
+    attr.ia_valid = ATTR_SIZE;
+    attr.ia_size = length;
+
+    // 加 inode 元数据锁（写锁），保护 size 等元数据
+    write_lock(&inode->i_meta_lock);
+
+    // 调用具体文件系统的 setattr
+    int ret = inode->inode_ops->setattr(inode, &attr);
+
+    write_unlock(&inode->i_meta_lock);
+    return ret;
+}
+
+int sys_truncate(const char *path, off_t length)
+{
+    dentry_t *start = NULL;
+    dentry_t *dentry = NULL;
+    inode_t *inode;
+    pcb_t *current = get_current();
+    int ret = -1;
+
+    if (!path || path[0] == '\0')
+        return -1;
+
+    // 确定起始 dentry
+    if (path[0] == '/') {
+        start = vfs_mgr.root;
+        dentry_get(start);
+    } else {
+        start = current->cwd;
+        dentry_get(start);
+    }
+
+    dentry = vfs_lookup(start, path);
+    if (!dentry) {
+        dentry_put(start);
+        return -1;  // 文件不存在
+    }
+
+    inode = dentry->inode;
+    if (!inode) {
+        goto out;
+    }
+
+    // 检查文件类型：普通文件才能截断
+    if (!S_ISREG(inode->mode)) {
+        goto out;
+    }
+
+    // 检查写权限（简化：只要文件可写即可，具体权限检查可后续完善）
+    // 这里省略权限检查，由文件系统 setattr 内部处理
+
+    if (!inode->inode_ops || !inode->inode_ops->setattr) {
+        goto out;
+    }
+
+    // 准备属性
+    struct iattr attr;
+    attr.ia_valid = ATTR_SIZE;
+    attr.ia_size = length;
+
+    // 加 inode 元数据锁（写锁），保护 size 等元数据
+    write_lock(&inode->i_meta_lock);
+    ret = inode->inode_ops->setattr(inode, &attr);
+    write_unlock(&inode->i_meta_lock);
+
+out:
+    dentry_put(dentry);
+    dentry_put(start);
+    return ret;
+}
+

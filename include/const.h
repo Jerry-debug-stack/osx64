@@ -24,7 +24,7 @@ uint64_t mem_linear2phy(uint64_t addr,uint64_t cr3);
 #define SYSCALL_INTERRUPT_VECTOR 0x80
 #define MAX_SYSCALL_NUM          128
 
-#define MULTI_CORE_BALANCE_DELTA        4
+#define MULTI_CORE_BALANCE_DELTA        1
 
 #ifdef __GNUC__
 #define UNUSED __attribute__((unused))

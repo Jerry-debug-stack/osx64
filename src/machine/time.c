@@ -157,7 +157,7 @@ static void append_to_cpu_timer_list(spin_list_head_t *timer_list,timer_t *timer
     list_add(&timer->list_item,target);
 }
 
-static void add_timer(enum timer_type_enum timer_type,uint64_t first_ticks,uint32_t delta_ticks,pcb_t *task,uint32_t signal){
+UNUSED static void add_timer(enum timer_type_enum timer_type,uint64_t first_ticks,uint32_t delta_ticks,pcb_t *task,uint32_t signal){
     timer_t *timer = kmalloc(sizeof(timer_t));
     timer->timer_type = timer_type;
     timer->ticks = first_ticks + ticks;

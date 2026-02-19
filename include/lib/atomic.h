@@ -86,4 +86,16 @@ static inline int atomic_xchg(atomic_t *v, int new_)
     return __atomic_exchange_n(&v->counter, new_, __ATOMIC_SEQ_CST);
 }
 
+static inline int atomic_test_and_set_bit(int nr, volatile void *addr)
+{
+    int old;
+    __asm__ volatile(
+        "lock btsl %2, %1\n"   // 将 addr 的第 nr 位原子性地置1，并将原值存入 CF 标志
+        "sbbl %0, %0\n"        // 将 CF 扩展为全0或全1（即 0 或 -1）
+        : "=r" (old), "+m" (*(volatile long *)addr)
+        : "Ir" (nr)
+        : "memory");
+    return old;
+}
+
 #endif

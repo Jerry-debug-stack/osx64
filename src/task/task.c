@@ -324,12 +324,15 @@ void put_ahci_thread(void){
     kernel_thread("ahci",ahci_kernel_thread,pcb_of_init,0);
 }
 
-void init_cwd_for_started_tasks(struct dentry *root){
-    preempt_disable();
+int init_cwd_for_started_tasks(struct dentry *root){
     list_head_t *pos;
-    spin_list_for_each(pos,&task_manager.all_list){
+    int ret = 0;
+    spin_lock(&task_manager.all_list.lock);
+    list_for_each(pos,&task_manager.all_list.list){
         pcb_t *item = container_of(pos,pcb_t,all_list);
         item->cwd = root;
+        ret++;
     }
-    preempt_enable();
+    spin_unlock(&task_manager.all_list.lock);
+    return ret;
 }

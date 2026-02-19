@@ -83,4 +83,6 @@ static inline void preempt_enable(void) {
     get_current()->preempt_count--;
 }
 
+extern pcb_t *pcb_of_init;
+
 #endif

@@ -121,7 +121,7 @@ static int ramfs_lookup(inode_t *dir, dentry_t *dentry) {
     ramfs_dirent_t *dirent = ramfs_find_dirent(dir, dentry->name);
     if (!dirent) {
         dentry->negative = true;
-        return 0;  // 不存在
+        return -1;  // 不存在
     }
 
     inode_t *inode = dirent->inode;
@@ -188,6 +188,76 @@ static int ramfs_unlink(inode_t *dir, dentry_t *dentry) {
     return 0;
 }
 
+static int ramfs_rmdir(inode_t *dir, dentry_t *dentry)
+{
+    inode_t *inode = dentry->inode;
+    ramfs_dirent_t *dirent;
+
+    if (!S_ISDIR(inode->mode))
+        return -1;  // 不是目录
+
+    // 检查子目录是否为空（通过子目录的内部链表）
+    ramfs_inode_t *ri = ramfs_i(inode);
+    if (ri && ri->data && !list_empty((struct list_head *)ri->data))
+        return -1;  // 子目录非空
+
+    // 可选：同时检查 VFS 的 child_list
+    if (!list_empty(&dentry->child_list))
+        return -1;
+
+    // 在父目录的内部链表中查找并删除对应的 dirent
+    dirent = ramfs_find_dirent(dir, dentry->name);
+    if (!dirent)
+        return -1;  // 理论不应发生
+
+    list_del(&dirent->list);
+    kfree(dirent->name);
+    kfree(dirent);
+
+    // 减少子目录 inode 的 link_count
+    atomic_dec(&inode->link_count);
+
+    return 0;
+}
+
+static int ramfs_setattr(inode_t *inode, struct iattr *attr)
+{
+    if (attr->ia_valid & ATTR_SIZE) {
+        loff_t new_size = attr->ia_size;
+        ramfs_inode_t *ri = ramfs_i(inode);
+
+        if (new_size > (loff_t)ri->data_size) {
+            // 扩展：分配新内存，复制旧数据，新增部分清零
+            void *new_data = kmalloc(new_size);
+            if (!new_data) {
+                return -1;
+            }
+            if (ri->data) {
+                memcpy(new_data, ri->data, ri->data_size);
+                kfree(ri->data);
+            }
+            memset((char *)new_data + ri->data_size, 0, new_size - ri->data_size);
+            ri->data = new_data;
+            ri->data_size = new_size;
+        } else if (new_size < (loff_t)ri->data_size) {
+            // 截断：重新分配更小的内存（或直接缩小，但为简单重新分配）
+            void *new_data = NULL;
+            if (new_size > 0) {
+                new_data = kmalloc(new_size);
+                if (!new_data) {
+                    return -1;
+                }
+                memcpy(new_data, ri->data, new_size);
+            }
+            kfree(ri->data);
+            ri->data = new_data;
+            ri->data_size = new_size;
+        }
+        inode->size = new_size;
+    }
+    return 0;
+}
+
 static int ramfs_delete(inode_t *inode) {
     // 当 link_count 降到 0 时调用，释放资源
     ramfs_free_inode(inode);
@@ -198,9 +268,10 @@ struct inode_operations ramfs_inode_ops = {
     .lookup = ramfs_lookup,
     .create = ramfs_create,
     .mkdir  = ramfs_mkdir,
+    .rmdir  = ramfs_rmdir,
     .unlink = ramfs_unlink,
     .delete = ramfs_delete,
-    // 其他留空
+    .setattr = ramfs_setattr
 };
 
 static int ramfs_open(UNUSED inode_t *inode,UNUSED file_t *file) {
@@ -243,6 +314,7 @@ static ssize_t ramfs_write(file_t *file, const char __user *buf, size_t len, lof
             memcpy(new_data, ri->data, ri->data_size);
             kfree(ri->data);
         }
+        memset((char *)new_data + ri->data_size, 0, new_size - ri->data_size);
         ri->data = new_data;
         ri->data_size = new_size;
         inode->size = new_size;

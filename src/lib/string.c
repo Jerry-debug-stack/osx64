@@ -75,3 +75,49 @@ char *strrchr(const char *s, int c) {
     }
     return (char *)last;
 }
+
+char *strtok_r(char *str, const char *delim, char **saveptr)
+{
+    char *token_start;
+    const char *d;
+
+    if (str == (void *)0)
+        str = *saveptr;
+    while (*str != '\0') {
+        int is_delim = 0;
+        for (d = delim; *d != '\0'; d++) {
+            if (*str == *d) {
+                is_delim = 1;
+                break;
+            }
+        }
+        if (!is_delim)
+            break;
+        str++;
+    }
+    if (*str == '\0') {
+        *saveptr = str;
+        return (void *)0;
+    }
+    token_start = str;
+    while (*str != '\0') {
+        int is_delim = 0;
+        for (d = delim; *d != '\0'; d++) {
+            if (*str == *d) {
+                is_delim = 1;
+                break;
+            }
+        }
+        if (is_delim)
+            break;
+        str++;
+    }
+    if (*str != '\0') {
+        *str = '\0';
+        *saveptr = str + 1;
+    } else {
+        *saveptr = str;
+    }
+
+    return token_start;
+}
