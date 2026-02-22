@@ -50,7 +50,6 @@ typedef struct dentry {
     char               *name;
     struct inode       *inode;
     struct dentry      *parent;
-    struct dentry_operations *dentry_ops;
     list_head_t         child_list;
     list_head_t         child_list_item;
     /* cache计数 */
@@ -65,14 +64,13 @@ typedef struct dentry {
     bool                deleted;
     struct super_block *mounted_here;
     struct super_block *in_mnt;
-    /* 锁 */
-    spinlock_t          d_lock;
 } dentry_t;
 
 typedef struct super_block {
     int             fs_type;
     atomic_t        fs_ref;
     rwlock_t        sb_lock;
+    void            *private_data;
     struct super_operations *super_ops;
     struct dentry   *root;          // 挂载根 dentry
     struct dentry   *mountpoint;    // 挂载点 dentry（如果已挂载）
@@ -121,6 +119,7 @@ typedef struct inode_operations {
     int (*mkdir)(struct inode *dir, struct dentry *dentry, int mode);
     int (*rmdir)(struct inode *dir, struct dentry *dentry);
     int (*delete)(struct inode *dir);
+    int (*rename)(struct inode *old_dir, struct dentry *old_dentry,struct inode *new_dir, const char *new_name);
     /* 属性修改 */
     int (*setattr)(struct inode *inode, struct iattr *attr);
 } inode_operations_t;
@@ -134,11 +133,6 @@ typedef struct file_operations {
                      size_t len, int64_t *ppos);
     int     (*fsync)(struct file *file);
 } file_operations_t;
-
-typedef struct dentry_operations {
-    int (*d_revalidate)(struct dentry *dentry);
-    void (*d_release)(struct dentry *dentry);
-} dentry_operations_t;
 
 typedef struct vfs_manager {
     spin_list_head_t mount_list;
@@ -155,10 +149,12 @@ static inline void dentry_get(dentry_t *d)
 {
     atomic_inc(&d->refcount);
 }
+void dentry_put(dentry_t *dentry);
 static inline void inode_get(inode_t *inode)
 {
     atomic_inc(&inode->refcount);
 }
+void inode_put(inode_t *inode);
 static inline void sb_get(super_block_t *sb)
 {
     atomic_inc(&sb->fs_ref);
@@ -167,16 +163,22 @@ static inline void sb_put(super_block_t *sb)
 {
     atomic_dec(&sb->fs_ref);
 }
+static inline void getin_cwd(dentry_t *dentry){
+    sb_get(dentry->in_mnt);
+    dentry_get(dentry);
+}
+static inline void exit_cwd(dentry_t *dentry){
+    dentry_put(dentry);
+    sb_put(dentry->in_mnt);
+}
 dentry_t *dentry_create(const char *name,inode_t *inode);
 
 #include "fs/block.h"
 
-void inode_put(inode_t *inode);
-void dentry_put(dentry_t *dentry);
 int vfs_mount(partition_t *part, const char *target_path, int fstype);
+int vfs_umount(const char *target_path);
 dentry_t *vfs_lookup(dentry_t *start,const char *target_path);
 dentry_t *__vfs_lookup_locked(dentry_t *start,const char *target_path);
 super_block_t *super_block_create(partition_t *device,int fstype);
-uint8_t mount_fs(super_block_t *sb);
 
 #endif

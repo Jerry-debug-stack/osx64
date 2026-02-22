@@ -17,11 +17,11 @@ static inline uint32_t atomic_compare_exchange(uint32_t* dest, uint32_t expected
     return result;
 }
 
-static inline void atomic_inc(uint32_t *ptr) {
+static inline void atomic_inc_uin32(uint32_t *ptr) {
     __asm__ __volatile__ ("lock incl %0": "+m"(*ptr)::"memory");
 }
 
-static inline void atomic_dec(uint32_t *ptr) {
+static inline void atomic_dec_uin32(uint32_t *ptr) {
     __asm__ __volatile__ ("lock decl %0": "+m"(*ptr)::"memory");
 }
 

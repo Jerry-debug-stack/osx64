@@ -6,6 +6,7 @@
 #include "const.h"
 #include "lib/io.h"
 #include "lib/timer.h"
+#include "fs/fs.h"
 
 extern GLOBAL_CPU *cpus;
 
@@ -90,6 +91,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     if (parent)
     {
         new_task->cwd = parent->cwd;
+        getin_cwd(parent->cwd);
         new_task->parent = parent;
         spin_list_add_tail(&new_task->child_list_item, &parent->childs);
     }

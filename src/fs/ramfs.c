@@ -5,107 +5,97 @@
 #include "fs/fsmod.h"
 #include "const.h"
 
-static ramfs_inode_t *ramfs_i(inode_t *inode) {
-    return (ramfs_inode_t *)inode->private_data;
+extern struct file_operations ramfs_file_ops;
+
+static ramfs_node_t *ramfs_alloc_node(struct super_block *sb, int mode)
+{
+    ramfs_node_t *node = kmalloc(sizeof(ramfs_node_t));
+    if (!node) return NULL;
+    memset(node, 0, sizeof(ramfs_node_t));
+    node->mode = mode;
+    atomic_set(&node->link_count, 1);
+    spin_lock_init(&node->lock);
+    INIT_LIST_HEAD(&node->dir_entries);
+
+    ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)sb->private_data;
+    spin_lock(&sbi->lock);
+    node->ino = ++sbi->next_ino;
+    list_add_tail(&node->hash_list, &sbi->node_list);
+    spin_unlock(&sbi->lock);
+    return node;
 }
 
-static void ramfs_free_inode(inode_t *inode) {
-    ramfs_inode_t *ri = ramfs_i(inode);
-    if (!ri) return;
-    if (S_ISDIR(inode->mode)) {
-        // 释放目录下的所有 dirent 结构（但不释放子 inode，由 VFS 负责）
-        ramfs_dirent_t *dirent, *tmp;
-        list_for_each_entry_safe(dirent, tmp, (struct list_head *)ri->data, list) {
-            kfree(dirent->name);
-            kfree(dirent);
+static ramfs_node_t *ramfs_find_node(struct super_block *sb, uint64_t ino)
+{
+    ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)sb->private_data;
+    ramfs_node_t *node;
+    spin_lock(&sbi->lock);
+    list_for_each_entry(node, &sbi->node_list, hash_list) {
+        if (node->ino == ino) {
+            spin_unlock(&sbi->lock);
+            return node;
         }
-    } else if (S_ISREG(inode->mode)) {
-        // 释放文件缓冲区
-        if (ri->data) kfree(ri->data);
     }
-    kfree(ri);
-    inode->private_data = NULL;
-}
-
-static inode_t *ramfs_new_inode(super_block_t *sb, int mode) {
-    inode_t *inode = (inode_t *)kmalloc(sizeof(inode_t));
-    if (!inode) return NULL;
-    memset(inode, 0, sizeof(inode_t));
-    inode->ino = (uint64_t)inode;  // 简单用地址作为 inode 号
-    inode->mode = mode;
-    inode->sb = sb;
-    inode->default_file_ops = &ramfs_file_ops;
-    atomic_set(&inode->refcount, 1);
-    atomic_set(&inode->link_count, 0);  // 初始无硬链接
-    inode->inode_ops = &ramfs_inode_ops;
-    rwlock_init(&inode->i_meta_lock);
-    mutex_init(&inode->i_data_lock);
-    INIT_LIST_HEAD(&inode->lru_node);
-
-    ramfs_inode_t *ri = (ramfs_inode_t *)kmalloc(sizeof(ramfs_inode_t));
-    if (!ri) {
-        kfree(inode);
-        return NULL;
-    }
-    ri->mode = mode;
-    ri->data = NULL;
-    ri->data_size = 0;
-    if (S_ISDIR(mode)) {
-        // 初始化目录项链表
-        struct list_head *head = (struct list_head *)kmalloc(sizeof(struct list_head));
-        if (!head) {
-            kfree(ri);
-            kfree(inode);
-            return NULL;
-        }
-        INIT_LIST_HEAD(head);
-        ri->data = head;
-    }
-    inode->private_data = ri;
-
-    // 添加到超级块的 inode 列表（可选）
-    // spin_list_add(&inode->sb_list, &sb->inode_list);  // 需要 inode 中有 sb_list 字段
-    return inode;
-}
-
-/* 在目录中查找子项 */
-static ramfs_dirent_t *ramfs_find_dirent(inode_t *dir, const char *name) {
-    if (!S_ISDIR(dir->mode)) return NULL;
-    struct list_head *head = (struct list_head *)ramfs_i(dir)->data;
-    ramfs_dirent_t *dirent;
-    list_for_each_entry(dirent, head, list) {
-        if (strcmp(dirent->name, name) == 0)
-            return dirent;
-    }
+    spin_unlock(&sbi->lock);
     return NULL;
 }
 
-/* 向目录添加子项 */
-static int ramfs_add_dirent(inode_t *dir, const char *name, inode_t *inode) {
-    if (!S_ISDIR(dir->mode)) return -1;
-    struct list_head *head = (struct list_head *)ramfs_i(dir)->data;
-    ramfs_dirent_t *dirent = (ramfs_dirent_t *)kmalloc(sizeof(ramfs_dirent_t));
-    if (!dirent) return -1;
-    dirent->name = kstrdup(name);
-    if (!dirent->name) {
-        kfree(dirent);
-        return -1;
-    }
-    dirent->inode = inode;
-    list_add_tail(&dirent->list, head);
-    ramfs_i(dir)->data_size++;
-    atomic_inc(&inode->link_count);  // 目录项增加硬链接计数
-    return 0;
+static inode_t *ramfs_new_inode(super_block_t *sb, int mode)
+{
+    inode_t *inode = (inode_t *)kmalloc(sizeof(inode_t));
+    if (!inode) return NULL;
+    memset(inode, 0, sizeof(inode_t));
+    inode->ino = (uint64_t)inode; // 简单用地址，或者使用 sb 分配的序号
+    inode->mode = mode;
+    inode->sb = sb;
+    atomic_set(&inode->refcount, 1);
+    atomic_set(&inode->link_count, 0); // 初始为0，后续由 create 等设置为1
+    inode->inode_ops = &ramfs_inode_ops;
+    inode->default_file_ops = &ramfs_file_ops;
+    rwlock_init(&inode->i_meta_lock);
+    mutex_init(&inode->i_data_lock);
+    INIT_LIST_HEAD(&inode->lru_node);
+    // 如果需要，可以加入超级块的 inode 列表
+    return inode;
 }
 
 /* -------------------- 超级块操作 -------------------- */
 static inode_t *ramfs_read_root_inode(super_block_t *sb) {
-    return ramfs_new_inode(sb, S_IFDIR | 0755);
+    ramfs_sb_info_t *sbi = kmalloc(sizeof(ramfs_sb_info_t));
+    if (!sbi) return NULL;
+    INIT_LIST_HEAD(&sbi->node_list);
+    spin_lock_init(&sbi->lock);
+    sbi->next_ino = 0;
+    sb->private_data = sbi;
+
+    // 创建根节点
+    ramfs_node_t *root_node = ramfs_alloc_node(sb, S_IFDIR | 0755);
+    if (!root_node) {
+        kfree(sbi);
+        return NULL;
+    }
+
+    // 创建根 VFS inode
+    inode_t *root_inode = ramfs_new_inode(sb, S_IFDIR | 0755);
+    if (!root_inode) {
+        // 释放 root_node
+        return NULL;
+    }
+    root_inode->private_data = root_node;
+    root_inode->size = 0;
+    atomic_set(&root_inode->link_count, 1);
+    return root_inode;
 }
 
 static void ramfs_put_super(UNUSED super_block_t *sb) {
-    // 释放超级块下所有 inode（VFS 会通过 inode_put 逐步释放，这里可以空实现）
-    // 如果需要主动清理，可以遍历 sb->inode_list 释放
+    ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)sb->private_data;
+    ramfs_node_t *node, *tmp;
+    list_for_each_entry_safe(node, tmp, &sbi->node_list, hash_list) {
+        if (node->data) kfree(node->data);
+        // 目录项链表可能仍有残留，但卸载时应该已空
+        kfree(node);
+    }
+    kfree(sbi);
 }
 
 struct super_operations ramfs_super_ops = {
@@ -116,37 +106,67 @@ struct super_operations ramfs_super_ops = {
 
 /* -------------------- inode 操作 -------------------- */
 static int ramfs_lookup(inode_t *dir, dentry_t *dentry) {
-    if (!S_ISDIR(dir->mode)) return -1;
+    ramfs_node_t *dir_node = (ramfs_node_t *)dir->private_data;
+    ramfs_dirent_t *de;
+    ramfs_node_t *child_node;
 
-    ramfs_dirent_t *dirent = ramfs_find_dirent(dir, dentry->name);
-    if (!dirent) {
-        dentry->negative = true;
-        return -1;  // 不存在
+    spin_lock(&dir_node->lock);
+    list_for_each_entry(de, &dir_node->dir_entries, list) {
+        if (strcmp(de->name, dentry->name) == 0) {
+            child_node = ramfs_find_node(dir->sb, de->ino);
+            spin_unlock(&dir_node->lock);
+            if (!child_node) return -1; // 异常
+
+            // 创建新 VFS inode
+            inode_t *inode = ramfs_new_inode(dir->sb, child_node->mode);
+            if (!inode) return -1;
+            inode->private_data = child_node;
+            inode->size = child_node->file_size;
+            atomic_set(&inode->link_count, atomic_read(&child_node->link_count));
+            dentry->inode = inode;
+            atomic_inc(&inode->refcount);
+            dentry->negative = false;
+            return 0;
+        }
     }
-
-    inode_t *inode = dirent->inode;
-    dentry->inode = inode;
-    atomic_inc(&inode->refcount);   // dentry 引用 inode
-    dentry->negative = false;
-    return 0;
+    spin_unlock(&dir_node->lock);
+    dentry->negative = true;
+    return -1;
 }
 
 static int ramfs_create(inode_t *dir, dentry_t *dentry, int mode) {
-    if (!S_ISDIR(dir->mode)) return -1;
+    ramfs_node_t *dir_node = (ramfs_node_t *)dir->private_data;
+    ramfs_node_t *child_node = ramfs_alloc_node(dir->sb, S_IFREG | mode);
+    if (!child_node) return -1;
 
-    // 检查是否已存在
-    if (ramfs_find_dirent(dir, dentry->name))
-        return -1;  // EEXIST
-
-    // 创建新 inode（普通文件）
-    inode_t *inode = ramfs_new_inode(dir->sb, S_IFREG | mode);
-    if (!inode) return -1;
-
-    // 添加到目录
-    if (ramfs_add_dirent(dir, dentry->name, inode) < 0) {
-        inode_put(inode);
+    // 分配 VFS inode
+    inode_t *inode = ramfs_new_inode(dir->sb, child_node->mode);
+    if (!inode) {
+        // 回滚节点分配
+        // 简化：直接返回，实际应释放 child_node
         return -1;
     }
+    inode->private_data = child_node;
+    inode->size = 0;
+    atomic_set(&inode->link_count, 1);
+    child_node->file_size = 0;
+
+    // 创建目录项
+    ramfs_dirent_t *de = kmalloc(sizeof(ramfs_dirent_t));
+    if (!de) {
+        // 释放资源
+        return -1;
+    }
+    de->name = kstrdup(dentry->name);
+    if (!de->name) {
+        kfree(de);
+        return -1;
+    }
+    de->ino = child_node->ino;
+
+    spin_lock(&dir_node->lock);
+    list_add_tail(&de->list, &dir_node->dir_entries);
+    spin_unlock(&dir_node->lock);
 
     dentry->inode = inode;
     atomic_inc(&inode->refcount);
@@ -154,77 +174,138 @@ static int ramfs_create(inode_t *dir, dentry_t *dentry, int mode) {
     return 0;
 }
 
-static int ramfs_mkdir(inode_t *dir, dentry_t *dentry, int mode) {
-    if (!S_ISDIR(dir->mode)) return -1;
+static int ramfs_mkdir(inode_t *dir, dentry_t *dentry, int mode)
+{
+    ramfs_node_t *dir_node = (ramfs_node_t *)dir->private_data;
+    ramfs_node_t *child_node;
+    inode_t *inode;
+    ramfs_dirent_t *de;
+    ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)dir->sb->private_data;
 
-    if (ramfs_find_dirent(dir, dentry->name))
-        return -1;  // EEXIST
-
-    inode_t *inode = ramfs_new_inode(dir->sb, S_IFDIR | mode);
-    if (!inode) return -1;
-
-    if (ramfs_add_dirent(dir, dentry->name, inode) < 0) {
-        inode_put(inode);
+    // 1. 分配内部节点
+    child_node = ramfs_alloc_node(dir->sb, S_IFDIR | (mode & 0777));
+    if (!child_node)
         return -1;
-    }
 
+    // 2. 分配 VFS inode
+    inode = ramfs_new_inode(dir->sb, S_IFDIR | (mode & 0777));
+    if (!inode)
+        goto fail_free_node;
+
+    // 3. 关联
+    inode->private_data = child_node;
+    inode->size = 0;
+    atomic_set(&inode->link_count, 1);      // 目录至少有一个自身链接
+    child_node->file_size = 0;
+
+    // 4. 创建目录项（用于父目录）
+    de = kmalloc(sizeof(ramfs_dirent_t));
+    if (!de)
+        goto fail_free_inode;
+    de->name = kstrdup(dentry->name);
+    if (!de->name) {
+        kfree(de);
+        goto fail_free_inode;
+    }
+    de->ino = child_node->ino;
+
+    // 5. 将目录项加入父目录的内部链表
+    spin_lock(&dir_node->lock);
+    list_add_tail(&de->list, &dir_node->dir_entries);
+    spin_unlock(&dir_node->lock);
+
+    // 6. 关联 dentry
     dentry->inode = inode;
-    atomic_inc(&inode->refcount);
     dentry->negative = false;
+
     return 0;
+
+fail_free_inode:
+    kfree(inode);
+fail_free_node:
+    // 从超级块列表中移除并释放内部节点
+    spin_lock(&sbi->lock);
+    list_del(&child_node->hash_list);
+    spin_unlock(&sbi->lock);
+    kfree(child_node);
+    return -1;
 }
 
 static int ramfs_unlink(inode_t *dir, dentry_t *dentry) {
-    if (!S_ISDIR(dir->mode) || !dentry->inode) return -1;
+    ramfs_node_t *dir_node = (ramfs_node_t *)dir->private_data;
+    ramfs_node_t *child_node = (ramfs_node_t *)dentry->inode->private_data;
+    ramfs_dirent_t *de;
 
-    ramfs_dirent_t *dirent = ramfs_find_dirent(dir, dentry->name);
-    if (!dirent) return -1;
+    spin_lock(&dir_node->lock);
+    list_for_each_entry(de, &dir_node->dir_entries, list) {
+        if (strcmp(de->name, dentry->name) == 0) {
+            list_del(&de->list);
+            kfree(de->name);
+            kfree(de);
+            break;
+        }
+    }
+    spin_unlock(&dir_node->lock);
 
-    list_del(&dirent->list);
-    kfree(dirent->name);
-    kfree(dirent);
-    atomic_dec(&dentry->inode->link_count);
-    // dentry 本身会被 VFS 清理
+    if (atomic_dec_and_test(&child_node->link_count)) {
+        // 内部节点可释放
+        ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)dir->sb->private_data;
+        spin_lock(&sbi->lock);
+        list_del(&child_node->hash_list);
+        spin_unlock(&sbi->lock);
+        if (child_node->data) kfree(child_node->data);
+        kfree(child_node);
+    }
+    // VFS inode 的 link_count 由 VFS 在 unlink 后减少
     return 0;
 }
 
 static int ramfs_rmdir(inode_t *dir, dentry_t *dentry)
 {
-    inode_t *inode = dentry->inode;
-    ramfs_dirent_t *dirent;
+    ramfs_node_t *dir_node = (ramfs_node_t *)dir->private_data;
+    ramfs_node_t *child_node = (ramfs_node_t *)dentry->inode->private_data;
+    ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)dir->sb->private_data;
+    ramfs_dirent_t *de;
+    int found = 0;
 
-    if (!S_ISDIR(inode->mode))
-        return -1;  // 不是目录
-
-    // 检查子目录是否为空（通过子目录的内部链表）
-    ramfs_inode_t *ri = ramfs_i(inode);
-    if (ri && ri->data && !list_empty((struct list_head *)ri->data))
-        return -1;  // 子目录非空
-
-    // 可选：同时检查 VFS 的 child_list
-    if (!list_empty(&dentry->child_list))
+    spin_lock(&child_node->lock);
+    if (!list_empty(&child_node->dir_entries)) {
+        spin_unlock(&child_node->lock);
         return -1;
+    }
+    spin_unlock(&child_node->lock);
 
-    // 在父目录的内部链表中查找并删除对应的 dirent
-    dirent = ramfs_find_dirent(dir, dentry->name);
-    if (!dirent)
-        return -1;  // 理论不应发生
+    // 在父目录的目录项链表中查找并删除对应项
+    spin_lock(&dir_node->lock);
+    list_for_each_entry(de, &dir_node->dir_entries, list) {
+        if (strcmp(de->name, dentry->name) == 0) {
+            list_del(&de->list);
+            kfree(de->name);
+            kfree(de);
+            found = 1;
+            break;
+        }
+    }
+    spin_unlock(&dir_node->lock);
 
-    list_del(&dirent->list);
-    kfree(dirent->name);
-    kfree(dirent);
+    if (!found)
+        return -1;  // 理论上不应发生
 
-    // 减少子目录 inode 的 link_count
-    atomic_dec(&inode->link_count);
+    if (atomic_dec_and_test(&child_node->link_count)) {
+        spin_lock(&sbi->lock);
+        list_del(&child_node->hash_list);
+        spin_unlock(&sbi->lock);
+        kfree(child_node);
+    }
 
     return 0;
 }
 
 static int ramfs_setattr(inode_t *inode, struct iattr *attr)
 {
+    ramfs_node_t *ri = inode->private_data;
     if (attr->ia_valid & ATTR_SIZE) {
         loff_t new_size = attr->ia_size;
-        ramfs_inode_t *ri = ramfs_i(inode);
 
         if (new_size > (loff_t)ri->data_size) {
             // 扩展：分配新内存，复制旧数据，新增部分清零
@@ -258,9 +339,52 @@ static int ramfs_setattr(inode_t *inode, struct iattr *attr)
     return 0;
 }
 
-static int ramfs_delete(inode_t *inode) {
-    // 当 link_count 降到 0 时调用，释放资源
-    ramfs_free_inode(inode);
+static int ramfs_delete(UNUSED inode_t *inode) {
+    return 0;
+}
+
+static int ramfs_rename(inode_t *old_dir, dentry_t *old_dentry,
+                        inode_t *new_dir, const char *new_name)
+{
+    ramfs_node_t *old_dir_node = (ramfs_node_t *)old_dir->private_data;
+    ramfs_node_t *new_dir_node = (ramfs_node_t *)new_dir->private_data;
+    ramfs_dirent_t *de;
+    uint64_t target_ino;
+    int found = 0;
+
+    if (old_dir == new_dir && strcmp(old_dentry->name, new_name) == 0)
+        return 0;
+
+    spin_lock(&old_dir_node->lock);
+    list_for_each_entry(de, &old_dir_node->dir_entries, list) {
+        if (strcmp(de->name, old_dentry->name) == 0) {
+            target_ino = de->ino;
+            list_del(&de->list);
+            kfree(de->name);
+            kfree(de);
+            found = 1;
+            break;
+        }
+    }
+    spin_unlock(&old_dir_node->lock);
+
+    if (!found)
+        return -1;
+
+    de = kmalloc(sizeof(ramfs_dirent_t));
+    if (!de)
+        return -1;
+    de->name = kstrdup(new_name);
+    if (!de->name) {
+        kfree(de);
+        return -1;
+    }
+    de->ino = target_ino;
+
+    spin_lock(&new_dir_node->lock);
+    list_add_tail(&de->list, &new_dir_node->dir_entries);
+    spin_unlock(&new_dir_node->lock);
+
     return 0;
 }
 
@@ -271,7 +395,8 @@ struct inode_operations ramfs_inode_ops = {
     .rmdir  = ramfs_rmdir,
     .unlink = ramfs_unlink,
     .delete = ramfs_delete,
-    .setattr = ramfs_setattr
+    .setattr = ramfs_setattr,
+    .rename = ramfs_rename
 };
 
 static int ramfs_open(UNUSED inode_t *inode,UNUSED file_t *file) {
@@ -286,7 +411,7 @@ static ssize_t ramfs_read(file_t *file, char __user *buf, size_t len, loff_t *pp
     inode_t *inode = file->inode;
     if (!S_ISREG(inode->mode)) return -1;
 
-    ramfs_inode_t *ri = ramfs_i(inode);
+    ramfs_node_t *ri = inode->private_data;
     if (!ri->data) return 0;
 
     loff_t pos = *ppos;
@@ -303,7 +428,7 @@ static ssize_t ramfs_write(file_t *file, const char __user *buf, size_t len, lof
     inode_t *inode = file->inode;
     if (!S_ISREG(inode->mode)) return -1;
 
-    ramfs_inode_t *ri = ramfs_i(inode);
+    ramfs_node_t *ri = inode->private_data;
     loff_t pos = *ppos;
     size_t new_size = pos + len;
 
