@@ -20,6 +20,7 @@ typedef struct block_device {
     uint32_t total_blocks;
 
     list_head_t global_list;
+    struct dentry *fs_dentry;
 
     int (*read)(struct block_device* dev,uint64_t lba,uint32_t count,void* buffer);
     int (*write)(struct block_device* dev,uint64_t lba,uint32_t count,const void* buffer);
@@ -51,7 +52,9 @@ typedef struct {
     spin_list_head_t device_list;
 } block_manager_t;
 
-int block_register(block_device_t* dev);
+int block_register(block_device_t* dev,bool locked);
+int block_unregister(block_device_t *dev);
+int mbr_scan(block_device_t* disk,bool locked);
 
 #define MBR_SIGNATURE 0xAA55
 #define MBR_PART_COUNT 4
@@ -74,5 +77,6 @@ typedef struct {
 
 #define PARTITION_LINUX 0x83
 #define FS_TYPE_RAMFS  0x1001
+#define FS_TYPE_DEVFS  0x1002
 
 #endif

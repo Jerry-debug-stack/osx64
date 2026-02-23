@@ -26,4 +26,21 @@
 #define SEEK_CUR    1   /* 从当前位置 */
 #define SEEK_END    2   /* 从文件末尾 */
 
+// 文件类型常量（用于 d_type）
+#define DT_UNKNOWN  0
+#define DT_REG      1   // 普通文件
+#define DT_DIR      2   // 目录
+#define DT_CHR      3   // 字符设备
+#define DT_BLK      4   // 块设备
+#define DT_FIFO     5   // FIFO
+#define DT_SOCK     6   // 套接字
+#define DT_LNK      7   // 符号链接
+
+typedef struct dirent {
+    uint64_t d_ino;      // inode 号
+    uint16_t d_reclen;   // 记录长度
+    uint8_t  d_type;     // 文件类型
+    char     d_name[];   // 文件名
+} dirent_t;
+
 #endif

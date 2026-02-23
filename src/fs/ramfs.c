@@ -1,4 +1,5 @@
 #include "fs/ramfs.h"
+#include "fs/fcntl.h"
 #include "mm/mm.h"
 #include "lib/string.h"
 #include "view/view.h"
@@ -49,7 +50,6 @@ static inode_t *ramfs_new_inode(super_block_t *sb, int mode)
     inode->mode = mode;
     inode->sb = sb;
     atomic_set(&inode->refcount, 1);
-    atomic_set(&inode->link_count, 0); // 初始为0，后续由 create 等设置为1
     inode->inode_ops = &ramfs_inode_ops;
     inode->default_file_ops = &ramfs_file_ops;
     rwlock_init(&inode->i_meta_lock);
@@ -83,7 +83,6 @@ static inode_t *ramfs_read_root_inode(super_block_t *sb) {
     }
     root_inode->private_data = root_node;
     root_inode->size = 0;
-    atomic_set(&root_inode->link_count, 1);
     return root_inode;
 }
 
@@ -122,15 +121,12 @@ static int ramfs_lookup(inode_t *dir, dentry_t *dentry) {
             if (!inode) return -1;
             inode->private_data = child_node;
             inode->size = child_node->file_size;
-            atomic_set(&inode->link_count, atomic_read(&child_node->link_count));
             dentry->inode = inode;
             atomic_inc(&inode->refcount);
-            dentry->negative = false;
             return 0;
         }
     }
     spin_unlock(&dir_node->lock);
-    dentry->negative = true;
     return -1;
 }
 
@@ -148,7 +144,6 @@ static int ramfs_create(inode_t *dir, dentry_t *dentry, int mode) {
     }
     inode->private_data = child_node;
     inode->size = 0;
-    atomic_set(&inode->link_count, 1);
     child_node->file_size = 0;
 
     // 创建目录项
@@ -170,7 +165,6 @@ static int ramfs_create(inode_t *dir, dentry_t *dentry, int mode) {
 
     dentry->inode = inode;
     atomic_inc(&inode->refcount);
-    dentry->negative = false;
     return 0;
 }
 
@@ -195,7 +189,6 @@ static int ramfs_mkdir(inode_t *dir, dentry_t *dentry, int mode)
     // 3. 关联
     inode->private_data = child_node;
     inode->size = 0;
-    atomic_set(&inode->link_count, 1);      // 目录至少有一个自身链接
     child_node->file_size = 0;
 
     // 4. 创建目录项（用于父目录）
@@ -216,7 +209,6 @@ static int ramfs_mkdir(inode_t *dir, dentry_t *dentry, int mode)
 
     // 6. 关联 dentry
     dentry->inode = inode;
-    dentry->negative = false;
 
     return 0;
 
@@ -450,10 +442,89 @@ static ssize_t ramfs_write(file_t *file, const char __user *buf, size_t len, lof
     return len;
 }
 
+static int ramfs_fsync(UNUSED struct file *file){
+    return 0;
+}
+
+static int ramfs_readdir(struct file *file, struct dirent __user *dirp, unsigned int count)
+{
+    inode_t *inode = file->inode;
+    dentry_t *dentry = file->dentry;
+    int pos = (int)file->pos;
+    int name_len;
+    unsigned int reclen;
+    struct dirent ud;
+
+    // 处理 "." 和 ".."
+    if (pos == 0) {
+        ud.d_ino = inode->ino;
+        ud.d_type = DT_DIR;
+        strcpy(ud.d_name, ".");
+        name_len = 1;
+        reclen = sizeof(struct dirent) + name_len + 1;
+        if (reclen > count) return -1;
+        ud.d_reclen = reclen;
+        if (copy_to_user(dirp, &ud, reclen) != 0)
+            return -1;
+        file->pos = 1;
+        return 0;
+    }
+    if (pos == 1) {
+        inode_t *parent_inode = dentry->parent ? dentry->parent->inode : inode;
+        ud.d_ino = parent_inode->ino;
+        ud.d_type = DT_DIR;
+        strcpy(ud.d_name, "..");
+        name_len = 2;
+        reclen = sizeof(struct dirent) + name_len + 1;
+        if (reclen > count) return -1;
+        ud.d_reclen = reclen;
+        if (copy_to_user(dirp, &ud, reclen) != 0)
+            return -1;
+        file->pos = 2;
+        return 0;
+    }
+
+    // 遍历实际子项
+    int idx = pos - 2;
+    int i = 0;
+    dentry_t *child = NULL;
+    struct list_head *p;
+    list_for_each(p, &dentry->child_list) {
+        if (i == idx) {
+            child = container_of(p, dentry_t, child_list_item);
+            break;
+        }
+        i++;
+    }
+    if (!child)
+        return -1;
+
+    ud.d_ino = child->inode->ino;
+    if (S_ISDIR(child->inode->mode))
+        ud.d_type = DT_DIR;
+    else if (S_ISREG(child->inode->mode))
+        ud.d_type = DT_REG;
+    else
+        ud.d_type = DT_UNKNOWN;
+
+    name_len = strlen(child->name);
+    reclen = sizeof(struct dirent) + name_len + 1;
+    if (reclen > count) return -1;
+    ud.d_reclen = reclen;
+    memcpy(ud.d_name, child->name, name_len + 1);
+
+    if (copy_to_user(dirp, &ud, reclen) != 0)
+        return -1;
+
+    file->pos = pos + 1;
+    return 0;
+}
+
 struct file_operations ramfs_file_ops = {
     .open   = ramfs_open,
     .release= ramfs_release,
     .read   = ramfs_read,
     .write  = ramfs_write,
-    // .fsync 暂不实现
+    .fsync  = ramfs_fsync,
+    .readdir = ramfs_readdir
 };

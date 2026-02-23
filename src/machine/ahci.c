@@ -19,8 +19,6 @@ uint64_t ahci_device_uid(ahci_identify_t *data);
 static void ahci_register_block_device(ahci_device_t *adev);
 static ahci_manager_t ahci_mgr;
 
-extern int mbr_scan(block_device_t* disk);
-
 static void ahci_register_device(hba_mem_t *hba, int port_no)
 {
     if (ahci_mgr.count >= AHCI_MAX_DEVICES)
@@ -400,5 +398,5 @@ static void ahci_register_block_device(ahci_device_t *adev)
     bdev->read  = ahci_block_read;
     bdev->write = ahci_block_write;
 
-    block_register(bdev);
+    block_register(bdev,false);
 }

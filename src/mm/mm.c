@@ -311,3 +311,10 @@ static inline void invlpg_tlb(uint64_t addr)
 {
     __asm__ __volatile__("invlpg (%0);" ::"r"(addr) : "memory");
 }
+
+int copy_to_user(void *dest,void *source,uint32_t length){
+    // 暂时先直接用memcpy
+    memcpy(dest,source,length);
+    return 0;
+}
+

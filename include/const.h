@@ -8,6 +8,7 @@
 #define easy_phy2linear(addr) (void*)((uint64_t)(addr) + VIRTUAL_ADDR_0)
 #define easy_linear2phy(addr) (void*)((uint64_t)(addr) - VIRTUAL_ADDR_0)
 uint64_t mem_linear2phy(uint64_t addr,uint64_t cr3);
+int copy_to_user(void *dest,void *source,uint32_t length);
 
 #define halt()                           \
     do {                                 \

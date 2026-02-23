@@ -1,16 +1,35 @@
 #include "mm/mm.h"
 #include "fs/block.h"
+#include "fs/devfs.h"
+#include "fs/fcntl.h"
+#include "fs/fs.h"
 #include "lib/string.h"
 #include "view/view.h"
 #include "lib/io.h"
+#include "const.h"
 
 static block_manager_t block_mgr;
+
+static int block_file_open(UNUSED struct inode *inode,UNUSED struct file *file);
+static int block_file_release(UNUSED struct inode *inode,UNUSED struct file *file);
+static ssize_t block_file_read(struct file *file, char __user *buf,size_t len, int64_t *ppos);
+static ssize_t block_file_write(struct file *file, const char __user *buf,size_t len, int64_t *ppos);
+static int block_file_fsync(UNUSED struct file *file);
+static int block_file_readdir(UNUSED struct file *file, UNUSED struct dirent __user *dirp, UNUSED unsigned int count);
+
+struct file_operations block_file_ops = {
+    .fsync = block_file_fsync,
+    .open = block_file_open,
+    .read = block_file_read,
+    .release = block_file_release,
+    .write = block_file_write,
+    .readdir = block_file_readdir
+};
 
 static inline void disk_index_to_name(uint64_t index, char *buf);
 static inline uint64_t alloc_block_id(void);
 static inline uint64_t alloc_device_id(void);
-int mbr_scan(block_device_t* disk);
-static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int index);
+static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int index,bool locked);
 
 void init_block(void)
 {
@@ -20,7 +39,7 @@ void init_block(void)
     spin_list_init(&block_mgr.device_list);
 }
 
-int block_register(block_device_t *dev)
+int block_register(block_device_t *dev,bool locked)
 {
     dev->id = alloc_block_id();
     INIT_LIST_HEAD(&dev->global_list);
@@ -46,7 +65,19 @@ int block_register(block_device_t *dev)
         spin_list_add_tail(&partition->childs_list_item, &real_device->childs);
         io_set_intr(intr);
     }
+    devfs_block_register(dev->name,O_RDWR,&block_file_ops,dev,DENTRY_BLOCK_DEV,locked);
     return 0;
+}
+
+int block_unregister(block_device_t *dev){
+    if (dev->type == BLOCK_DISK){
+        return -1;
+    }else{
+        partition_t *partition = (partition_t *)dev;
+        list_del(&partition->childs_list_item);
+        kfree(dev);
+        return 0;
+    }
 }
 
 static inline uint64_t alloc_block_id(void)
@@ -81,21 +112,65 @@ static inline void disk_index_to_name(uint64_t index, char *buf)
 
 static int partition_read(block_device_t *dev,uint64_t lba,uint32_t cnt,void *buf)
 {
-    partition_t *part = (partition_t *)dev;
-    if (lba + cnt > part->sector_count)
-        return -1;
-    return part->parent->read(part->parent,part->start_lba + lba,cnt,buf);
+    if (dev->type == BLOCK_PARTITION){
+        partition_t *part = (partition_t *)dev;
+        if (lba + cnt > part->sector_count)
+            return -1;
+        return part->parent->read(part->parent,part->start_lba + lba,cnt,buf);
+    }else{
+        return dev->read(dev,lba,cnt,buf);
+    }
 }
 
 static int partition_write(block_device_t *dev,uint64_t lba,uint32_t cnt,const void *buf)
 {
-    partition_t *part = (partition_t *)dev;
-    if (lba + cnt > part->sector_count)
-        return -1;
-    return part->parent->write(part->parent,part->start_lba + lba,cnt,buf);
+    if (dev->type == BLOCK_PARTITION){
+        partition_t *part = (partition_t *)dev;
+        if (lba + cnt > part->sector_count)
+            return -1;
+        return part->parent->write(part->parent,part->start_lba + lba,cnt,buf);
+    }else{
+        return dev->write(dev,lba,cnt,buf);
+    }
 }
 
-static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int index)
+static int block_file_open(UNUSED struct inode *inode,UNUSED struct file *file){
+    return 0;
+}
+
+static int block_file_release(UNUSED struct inode *inode,UNUSED struct file *file){
+    return 0;
+}
+
+static ssize_t block_file_read(struct file *file, char __user *buf,size_t len, int64_t *ppos){
+    if (!file || !file->inode || !file->inode->private_data)
+        return -1;
+    block_device_t *dev = file->inode->private_data;
+    ssize_t ret = partition_read(dev,*ppos,len,buf);
+    if (ret >= 0)
+        *ppos += ret;
+    return ret;
+}
+
+static ssize_t block_file_write(struct file *file, const char __user *buf,size_t len, int64_t *ppos){
+    if (!file || !file->inode || !file->inode->private_data)
+        return -1;
+    block_device_t *dev = file->inode->private_data;
+    ssize_t ret = partition_write(dev,*ppos,len,buf);
+    if (ret >= 0)
+        *ppos += ret;
+    return ret;
+}
+
+static int block_file_fsync(UNUSED struct file *file){
+    return 0;
+}
+
+static int block_file_readdir(UNUSED struct file *file, UNUSED struct dirent __user *dirp, UNUSED unsigned int count){
+    return -1;
+}
+
+static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int index,bool locked)
 {
     if (ent->sector_count == 0)
         return;
@@ -119,7 +194,7 @@ static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int ind
 
     sprintf(&part->device.name[0],"%s%d",18,&part->parent->name[0],index);
 
-    block_register(&part->device);
+    block_register(&part->device,locked);
 
     wb_printf("[  MBR  ] loaded primary partition %s start=%u sectors=%u type=0x%x\n",
            part->device.name,
@@ -133,7 +208,7 @@ static int is_extended_type(uint8_t type)
     return (type == 0x05 || type == 0x0F || type == 0x85);
 }
 
-static void scan_extended(block_device_t* disk,uint32_t ext_base_lba)
+static void scan_extended(block_device_t* disk,uint32_t ext_base_lba,bool locked)
 {
     uint8_t buffer[512];
     uint32_t current_ebr = ext_base_lba;
@@ -180,7 +255,7 @@ static void scan_extended(block_device_t* disk,uint32_t ext_base_lba)
             part->device.write        = partition_write;
             part->device.private_data = part;
             sprintf(part->device.name,"%s%d",(uint32_t)sizeof(part->device.name),disk->name,logical_index++);
-            block_register(&part->device);
+            block_register(&part->device,locked);
             wb_printf("[  MBR  ] loaded logical partition %s start=%u size=%u type=0x%x\n",part->device.name,abs_start,part_entry->sector_count,part_entry->type);
         }
         if (next_entry->type == 0 ||
@@ -198,11 +273,11 @@ void read_partitions(void){
     list_head_t *pos;
     list_for_each(pos,&block_mgr.device_list.list){
         real_device_t *device = container_of(pos,real_device_t,device_list_item);
-        mbr_scan(&device->device);
+        mbr_scan(&device->device,false);
     }
 }
 
-int mbr_scan(block_device_t* disk)
+int mbr_scan(block_device_t* disk,bool locked)
 {
     uint8_t buffer[512];
     if (disk->block_size != 512) {
@@ -230,13 +305,11 @@ int mbr_scan(block_device_t* disk)
             continue;
         if (is_extended_type(ent->type)) {
             wb_printf("[  MBR  ] extended found at %u\n",ent->start_lba);
-            scan_extended(disk, ent->start_lba);
+            scan_extended(disk, ent->start_lba,locked);
         }
         else {
-            load_primary_partition(disk, ent, i);
+            load_primary_partition(disk, ent, i,locked);
         }
     }
     return 0;
 }
-
-

@@ -52,6 +52,9 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
     cpu_task_start();
 }
 
+
+void test_filesystem();
+
 void init(void){
     color_print("[SYSTEM ] enter init progress!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
     
@@ -59,6 +62,7 @@ void init(void){
     enumerate_pcie_devices();
     put_ahci_thread();
     read_partitions();
+    test_filesystem();
 
     while (1)
     {

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include "lib/safelist.h"
 #include "lib/atomic.h"
+#include "fs/fcntl.h"
 
 #define DENTRY_CACHE_SIZE   1024
 #define MAX_NAME 128
@@ -18,7 +19,6 @@ typedef struct inode {
     uint64_t            size;
     struct super_block *sb;
     atomic_t            refcount;      // file / dentry 等活跃引用
-    atomic_t            link_count;    // 目录项引用
     struct inode_operations *inode_ops;
     bool                deleting;      // unlink后
     void               *private_data;
@@ -45,6 +45,8 @@ typedef struct inode {
 #define DENTRY_FLAG_MOUNTPOINT          (0x1<<0)
 #define DENTRY_FLAG_MOUNT_IN_PROGRESS   (0x1<<1)
 #define DENTRY_BLOCK_ROOT               (0x1<<2)
+#define DENTRY_BLOCK_DEV                (0x1<<3)
+#define DENTRY_CHARACTER_DEV            (0x1<<4)
 
 typedef struct dentry {
     char               *name;
@@ -60,7 +62,6 @@ typedef struct dentry {
     /* 引用计数 */
     atomic_t            refcount;
     /* 状态 */
-    bool                negative;      // name存在但inode不存在
     bool                deleted;
     struct super_block *mounted_here;
     struct super_block *in_mnt;
@@ -132,6 +133,7 @@ typedef struct file_operations {
     ssize_t (*write)(struct file *file, const char __user *buf,
                      size_t len, int64_t *ppos);
     int     (*fsync)(struct file *file);
+    int     (*readdir)(struct file *file, struct dirent __user *dirp, unsigned int count);
 } file_operations_t;
 
 typedef struct vfs_manager {
@@ -150,6 +152,7 @@ static inline void dentry_get(dentry_t *d)
     atomic_inc(&d->refcount);
 }
 void dentry_put(dentry_t *dentry);
+void dentry_delete(dentry_t *dentry);
 static inline void inode_get(inode_t *inode)
 {
     atomic_inc(&inode->refcount);
@@ -173,10 +176,30 @@ static inline void exit_cwd(dentry_t *dentry){
 }
 dentry_t *dentry_create(const char *name,inode_t *inode);
 
+int sys_open(const char *path, int flags, int mode);
+ssize_t sys_read(int fd, char *buf, size_t count);
+ssize_t sys_write(int fd, const char *buf, size_t count);
+int sys_close(int fd);
+off_t sys_lseek(int fd, off_t offset, int whence);
+int sys_mkdir(const char *path, int mode);
+int sys_rmdir(const char *path);
+int sys_unlink(const char *path);
+int sys_chdir(const char *path);
+int sys_ftruncate(int fd, off_t length);
+int sys_truncate(const char *path, off_t length);
+int sys_rename(const char *oldpath, const char *newpath);
+int sys_dup(int oldfd);
+int sys_dup2(int oldfd, int newfd);
+int sys_getcwd(char *buf, size_t size);
+int sys_mount(const char *dev_path,const char *to_path);
+int sys_umount(const char *target_path);
+int sys_reload_partition(char *target);
+int sys_getdent(int fd, struct dirent __user *dirp, unsigned int count);
+
 #include "fs/block.h"
 
 int vfs_mount(partition_t *part, const char *target_path, int fstype);
-int vfs_umount(const char *target_path);
+int sys_umount(const char *target_path);
 dentry_t *vfs_lookup(dentry_t *start,const char *target_path);
 dentry_t *__vfs_lookup_locked(dentry_t *start,const char *target_path);
 super_block_t *super_block_create(partition_t *device,int fstype);
