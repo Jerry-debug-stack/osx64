@@ -2,6 +2,8 @@
 #define OS_EXT2_H
 
 #include <stdint.h>
+#include "fs.h"
+#include "lib/safelist.h"
 
 /*
  * 超级块魔数
@@ -168,6 +170,27 @@ typedef struct ext2_super_block {
     uint32_t  s_reserved[172];            // 填充到块大小
 } __attribute__((packed)) ext2_super_block_t;
 
+typedef struct ext2_group_desc_cache {
+    uint32_t bg_block_bitmap;       // 块位图块号
+    uint32_t bg_inode_bitmap;       // inode位图块号
+    uint32_t bg_inode_table;        // inode表起始块号
+    uint16_t bg_free_blocks_count;  // 组内空闲块数
+    uint16_t bg_free_inodes_count;  // 组内空闲inode数
+    uint16_t bg_used_dirs_count;     // 组内目录数
+    uint8_t *block_bitmap;           // 块位图缓存（可选）
+    uint8_t *inode_bitmap;           // inode位图缓存（可选）
+    mutex_t block_lock;    // 保护块位图及块分配
+    mutex_t inode_lock;    // 保护 inode 位图及 inode 分配
+} ext2_group_desc_cache_t;
+
+typedef struct ext2_fs_info {
+    struct ext2_super_block es;
+    uint32_t block_size;
+    uint32_t inode_size;
+    uint32_t group_count;
+    ext2_group_desc_cache_t *group_descs;
+} ext2_fs_info_t;
+
 /*
  * 块组描述符 - ext2_group_desc
  * 位于超级块之后，描述每个块组的信息
@@ -281,5 +304,7 @@ typedef struct ext2_dir_entry {
 #define EXT2_S_IROTH  0x0004  // 其他人读
 #define EXT2_S_IWOTH  0x0002  // 其他人写
 #define EXT2_S_IXOTH  0x0001  // 其他人执行
+
+extern super_operations_t ext2_super_ops;
 
 #endif

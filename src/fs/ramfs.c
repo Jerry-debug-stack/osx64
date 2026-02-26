@@ -49,6 +49,7 @@ static inode_t *ramfs_new_inode(super_block_t *sb, int mode)
     inode->ino = (uint64_t)inode; // 简单用地址，或者使用 sb 分配的序号
     inode->mode = mode;
     inode->sb = sb;
+    atomic_set(&inode->link_count,1);
     atomic_set(&inode->refcount, 1);
     inode->inode_ops = &ramfs_inode_ops;
     inode->default_file_ops = &ramfs_file_ops;
@@ -164,7 +165,6 @@ static int ramfs_create(inode_t *dir, dentry_t *dentry, int mode) {
     spin_unlock(&dir_node->lock);
 
     dentry->inode = inode;
-    atomic_inc(&inode->refcount);
     return 0;
 }
 
@@ -239,15 +239,7 @@ static int ramfs_unlink(inode_t *dir, dentry_t *dentry) {
     }
     spin_unlock(&dir_node->lock);
 
-    if (atomic_dec_and_test(&child_node->link_count)) {
-        // 内部节点可释放
-        ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)dir->sb->private_data;
-        spin_lock(&sbi->lock);
-        list_del(&child_node->hash_list);
-        spin_unlock(&sbi->lock);
-        if (child_node->data) kfree(child_node->data);
-        kfree(child_node);
-    }
+    atomic_dec(&child_node->link_count);
     // VFS inode 的 link_count 由 VFS 在 unlink 后减少
     return 0;
 }
@@ -332,6 +324,16 @@ static int ramfs_setattr(inode_t *inode, struct iattr *attr)
 }
 
 static int ramfs_delete(UNUSED inode_t *inode) {
+    if (atomic_read(&inode->refcount) == 0){
+        // 内部节点可释放
+        ramfs_sb_info_t *sbi = (ramfs_sb_info_t *)inode->sb->private_data;
+        ramfs_node_t *child_node = (ramfs_node_t *)inode->private_data;
+        spin_lock(&sbi->lock);
+        list_del(&child_node->hash_list);
+        spin_unlock(&sbi->lock);
+        if (child_node->data) kfree(child_node->data);
+        kfree(child_node);
+    }
     return 0;
 }
 

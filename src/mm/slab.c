@@ -186,8 +186,12 @@ uint8_t slab_free(void *vir_addr){
                     halt();
                 }
                 slab->bitmap[id >> 3] &= ~(1 << (id & 7));
-                if (slab->nextfree > id)
+                if (slab->nextfree == 0){
                     slab->nextfree = id;
+                }else{
+                    if (slab->nextfree > id)
+                        slab->nextfree = id;
+                }
                 slab->totalfree++;
                 return 0;
             }
@@ -210,9 +214,13 @@ uint8_t slab_free(void *vir_addr){
                     }
                 }
                 current->bitmap[inside_index >> 3] &= ~(1 << (inside_index & 7));
-                current->totalfree++;
-                if (current->nextfree > inside_index)
+                if (current->totalfree == 0){
                     current->nextfree = inside_index;
+                }else{
+                    if (current->nextfree > inside_index)
+                        current->nextfree = inside_index;
+                }
+                current->totalfree++;
                 if (current->id < mm.mnfslab[i]->id)
                     mm.mnfslab[i] = current;
                 return 0;

@@ -62,14 +62,19 @@ static void screen_clear(uint32_t color_back)
     memset(vMm.vbuffer, color_back, SCREEN_WIDTH * SCREEN_HEIGHT * 4);
 }
 
+static void screen_moveup(void)
+{
+    memcpy(vMm.vbuffer, vMm.vbuffer + SCREEN_WIDTH * CHAR_Y , SCREEN_WIDTH * (SCREEN_HEIGHT - CHAR_Y) * 4);
+    memset(vMm.vbuffer + SCREEN_WIDTH * (SCREEN_HEIGHT - CHAR_Y), 0, SCREEN_WIDTH * CHAR_Y * 4);
+}
+
 static void next_line(void)
 {
     vMm.disp_c_x = 0;
     vMm.disp_c_y++;
     if (vMm.disp_c_y >= (SCREEN_HEIGHT / CHAR_Y)) {
-        vMm.disp_c_y = 0;
-        vMm.disp_position = 0;
-        screen_clear(VIEW_COLOR_BLACK);
+        set_position(0,(SCREEN_HEIGHT / CHAR_Y) - 1);
+        screen_moveup();
     } else {
         vMm.disp_position = vMm.disp_c_y * ROW_SIZE_INTS;
     }

@@ -46,6 +46,7 @@ static inode_t *devfs_read_root_inode(struct super_block *sb)
     inode->mode = S_IFDIR | 0555;  // 只读目录
     inode->sb = sb;
     atomic_set(&inode->refcount, 1);
+    atomic_set(&inode->link_count,1);
     inode->inode_ops = &devfs_root_iops;
     inode->default_file_ops = NULL;  // 目录没有文件操作
     rwlock_init(&inode->i_meta_lock);

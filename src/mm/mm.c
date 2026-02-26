@@ -318,3 +318,7 @@ int copy_to_user(void *dest,void *source,uint32_t length){
     return 0;
 }
 
+int put_user(char num,char *buf){
+    *buf = num;
+    return 0;
+}

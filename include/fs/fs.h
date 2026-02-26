@@ -19,6 +19,7 @@ typedef struct inode {
     uint64_t            size;
     struct super_block *sb;
     atomic_t            refcount;      // file / dentry 等活跃引用
+    atomic_t            link_count;
     struct inode_operations *inode_ops;
     bool                deleting;      // unlink后
     void               *private_data;
@@ -140,8 +141,7 @@ typedef struct vfs_manager {
     spin_list_head_t mount_list;
     spin_list_head_t inode_list;
     spin_list_head_t dentry_cache_list;
-    spin_list_head_t dentry_deleting_list;
-    mutex_t mount_lock;
+    rwlock_t mount_lock;
     atomic_t dentry_cache_num;
     rwlock_t namespace_lock;
     dentry_t *root;
