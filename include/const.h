@@ -35,6 +35,6 @@ int put_user(char num,char *buf);
 #endif
 
 #define MAX_CPU_NUM                     32
-#define DEFAULT_PCB_SIZE                8*1024
+#define DEFAULT_PCB_SIZE                16*1024
 
 #endif

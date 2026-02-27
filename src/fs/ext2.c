@@ -9,9 +9,10 @@ static int ext2_create(struct inode *dir, struct dentry *dentry, int mode);
 static int ext2_delete(struct inode *dir);
 static int ext2_lookup(struct inode *dir, struct dentry *dentry);
 static int ext2_mkdir(struct inode *dir, struct dentry *dentry, int mode);
-
+static int ext2_rmdir(struct inode *dir, struct dentry *dentry);
 static int ext2_setattr(struct inode *inode, struct iattr *attr);
 static int ext2_unlink(struct inode *dir, struct dentry *dentry);
+static int ext2_rename(struct inode *old_dir, struct dentry *old_dentry,struct inode *new_dir, const char *new_name);
 
 static ssize_t ext2_read(struct file *file, char __user *buf, size_t len, loff_t *ppos);
 static ssize_t ext2_write(struct file *file, const char __user *buf, size_t len, loff_t *ppos);
@@ -33,6 +34,7 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block);
 static int ext2_write_inode(struct super_block *sb, uint32_t ino, struct ext2_inode *ei);
 static inline uint16_t EXT2_DIR_REC_LEN(uint16_t name_len);
 static int ext2_dir_add_entry(struct inode *dir, const char *name, uint32_t ino, uint8_t file_type);
+static int ext2_dir_remove_entry(struct inode *dir, uint32_t ino);
 static inode_t *ext2_iget(struct super_block *sb, uint32_t ino);
 static int ext2_bmap(struct inode *inode, uint32_t logical_block);
 static inode_t *ext2_create_VFS_inode(struct super_block *sb, struct ext2_inode *ei,uint64_t ino);
@@ -50,8 +52,8 @@ static struct inode_operations ext2_inode_ops = {
     .delete = ext2_delete,
     .lookup = ext2_lookup,
     .mkdir = ext2_mkdir,
-    .rename = NULL,
-    .rmdir = NULL,
+    .rename = ext2_rename,
+    .rmdir = ext2_rmdir,
     .setattr = ext2_setattr,
     .unlink = ext2_unlink
 };
@@ -268,7 +270,8 @@ static int ext2_delete(struct inode *dir){
             ext2_free_block(sb, ei->i_block[EXT2_DIND_BLOCK]);
         }
         // 三级间接块类似，可省略
-
+        memset(ei,0,sizeof(ext2_inode_t));
+        ext2_write_inode(sb,dir->ino,ei);
         // 释放 inode 号
         ext2_free_inode(sb, dir->ino);
     }
@@ -320,7 +323,6 @@ static int ext2_lookup(struct inode *dir, struct dentry *dentry)
                     return -1;
                 }
                 dentry->inode = child_inode;
-                atomic_inc(&child_inode->refcount); // dentry引用inode
                 kfree(buf);
                 return 0;
             }
@@ -427,6 +429,10 @@ static int ext2_mkdir(struct inode *dir, struct dentry *dentry, int mode)
     // 9. 关联 dentry(ref count 初始化为1了)
     dentry->inode = new_inode;
 
+    uint32_t group = (ino - 1) / fsi->es.s_inodes_per_group;
+    ext2_group_desc_cache_t *gd = &fsi->group_descs[group];
+    gd->bg_used_dirs_count++;
+
     return 0;
 out_block_inode:
     ext2_free_block(sb, phys_block);
@@ -441,8 +447,6 @@ out_inode:
 static int ext2_unlink(struct inode *dir, struct dentry *dentry)
 {
     struct super_block *sb = dir->sb;
-    ext2_fs_info_t *fsi = sb->private_data;
-    uint32_t block_size = fsi->block_size;
     struct inode *inode = dentry->inode;
     struct ext2_inode *ei = (struct ext2_inode *)inode->private_data;
     uint32_t target_ino = inode->ino;
@@ -450,68 +454,10 @@ static int ext2_unlink(struct inode *dir, struct dentry *dentry)
     if (S_ISDIR(inode->mode))
         return -1;
 
-    uint32_t blocks = (dir->size + block_size - 1) / block_size;
-    uint8_t *block_buf = kmalloc(block_size);
-    if (!block_buf) return -1;
-
-    for (uint32_t block_idx = 0; block_idx < blocks; block_idx++) {
-        uint32_t phys_block = ext2_bmap(dir, block_idx);
-        if (phys_block == 0) continue;
-        if (ext2_rw_block(sb, phys_block, block_buf, true) < 0) {
-            kfree(block_buf);
-            return -1;
-        }
-
-        uint32_t offset = 0;
-        struct ext2_dir_entry_2 *prev_phys = NULL;
-        while (offset < block_size) {
-            struct ext2_dir_entry_2 *de = (struct ext2_dir_entry_2 *)(block_buf + offset);
-            if (de->inode == target_ino) {
-                // 标记删除
-                de->inode = 0;
-                de->name_len = 0;
-
-                // 尝试与前一项合并
-                if (prev_phys) {
-                    prev_phys->rec_len += de->rec_len;
-                    // de 被合并，不再单独存在
-                    uint32_t next_off = offset + de->rec_len;
-                    if (next_off < block_size) {
-                        struct ext2_dir_entry_2 *next_de = (struct ext2_dir_entry_2 *)(block_buf + next_off);
-                        if (next_de->inode == 0) {
-                            prev_phys->rec_len += next_de->rec_len;
-                        }
-                    }
-                } else {
-                    // 尝试与后一项合并
-                    uint32_t next_off = offset + de->rec_len;
-                    if (next_off < block_size) {
-                        struct ext2_dir_entry_2 *next_de = (struct ext2_dir_entry_2 *)(block_buf + next_off);
-                        if (next_de->inode == 0) {
-                            de->rec_len += next_de->rec_len;
-                        }
-                    }
-                }
-
-                // 写回修改后的块
-                if (ext2_rw_block(sb, phys_block, block_buf,false) < 0) {
-                    kfree(block_buf);
-                    return -1;
-                }
-                goto found;
-            }
-            prev_phys = de;
-            offset += de->rec_len;
-        }
+    if (ext2_dir_remove_entry(dir, target_ino) < 0) {
+        return -1;
     }
-    kfree(block_buf);
-    return -1;
 
-found:
-    kfree(block_buf);
-
-    // 更新目标 inode 的链接计数
-    atomic_dec(&inode->link_count);
     ei->i_links_count--;
     if (ext2_write_inode(sb, target_ino, ei) < 0) {
         return -1;
@@ -549,6 +495,149 @@ static int ext2_setattr(struct inode *inode, struct iattr *attr)
     struct ext2_inode *ei = (struct ext2_inode *)inode->private_data;
     ei->i_size = new_size;
     ext2_write_inode(inode->sb, inode->ino, ei);
+
+    return 0;
+}
+
+static int ext2_rmdir(struct inode *dir, struct dentry *dentry)
+{
+    struct super_block *sb = dir->sb;
+    ext2_fs_info_t *fsi = sb->private_data;
+    uint32_t block_size = fsi->block_size;
+    struct inode *inode = dentry->inode;
+    struct ext2_inode *ei = (struct ext2_inode *)inode->private_data;
+    uint32_t target_ino = inode->ino;
+    uint32_t group = (target_ino - 1) / fsi->es.s_inodes_per_group;
+    ext2_group_desc_cache_t *gd = &fsi->group_descs[group];
+
+    if (!S_ISDIR(inode->mode)) return -1;
+
+    uint32_t blocks = (inode->size + block_size - 1) / block_size;
+    uint8_t *block_buf = kmalloc(block_size);
+    if (!block_buf) return -1;
+
+    int empty = 1;
+    for (uint32_t blk = 0; blk < blocks; blk++) {
+        uint32_t phys = ext2_bmap(inode, blk);
+        if (phys == 0) continue;   // 空洞
+        if (ext2_rw_block(sb, phys, block_buf,true) < 0) {
+            kfree(block_buf);
+            return -1;
+        }
+        uint32_t offset = 0;
+        while (offset < block_size) {
+            struct ext2_dir_entry_2 *de = (struct ext2_dir_entry_2 *)(block_buf + offset);
+            if (de->inode != 0) {
+                // 检查是否不是 . 或 ..
+                if (de->name_len != 1 || de->name[0] != '.') {
+                    if (de->name_len != 2 || de->name[0] != '.' || de->name[1] != '.') {
+                        empty = 0;
+                        break;
+                    }
+                }
+            }
+            offset += de->rec_len;
+        }
+        if (!empty) break;
+    }
+
+    if (!empty) {
+        kfree(block_buf);
+        return -1;   // 目录非空
+    }
+
+    // 删除父目录中的目录项
+    if (ext2_dir_remove_entry(dir, target_ino) < 0) {
+        return -1;
+    }
+
+    // 更新目标 inode 的磁盘信息（i_links_count 减1）
+    ei->i_links_count--;
+    if (ext2_write_inode(sb, target_ino, ei) < 0) {
+        return -1;
+    }
+
+    // 更新父目录的修改时间
+    //dir->i_mtime = get_seconds();
+    struct ext2_inode *dir_ei = (struct ext2_inode *)dir->private_data;
+    //dir_ei->i_mtime = dir->i_mtime;
+    dir_ei->i_links_count -= 1;
+    ext2_write_inode(sb, dir->ino, dir_ei);
+
+    // 更新块组信息
+    gd->bg_used_dirs_count--;
+    //gd->dirty = 1;
+    //fsi->sb_dirty = 1;
+
+    return 0;
+}
+
+static int ext2_rename(struct inode *old_dir, struct dentry *old_dentry,struct inode *new_dir, const char *new_name)
+{
+    struct super_block *sb = old_dir->sb;
+    ext2_fs_info_t *fsi = sb->private_data;
+    struct inode *inode = old_dentry->inode;
+    struct ext2_inode *old_dir_ei = (struct ext2_inode *)old_dir->private_data;
+    struct ext2_inode *new_dir_ei = (struct ext2_inode *)new_dir->private_data;
+    uint32_t ino = inode->ino;
+    uint8_t file_type = S_ISDIR(inode->mode) ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
+    int ret;
+
+    // 1. 从 old_dir 删除旧的目录项
+    ret = ext2_dir_remove_entry(old_dir, old_dentry->inode->ino);
+    if (ret < 0)
+        return ret;
+
+    // 2. 在 new_dir 添加新的目录项
+    ret = ext2_dir_add_entry(new_dir, new_name, ino, file_type);
+    if (ret < 0) {
+        // 回滚：重新添加旧的目录项
+        ext2_dir_add_entry(old_dir, old_dentry->name, ino, file_type);
+        return ret;
+    }
+
+    // 3. 如果是目录且跨目录移动，更新父目录的链接计数
+    if (S_ISDIR(inode->mode) && old_dir != new_dir) {
+        // old_dir 失去一个子目录，链接计数减1
+        old_dir_ei->i_links_count--;
+        ext2_write_inode(sb, old_dir->ino, old_dir_ei);
+
+        // new_dir 增加一个子目录，链接计数加1
+        new_dir_ei->i_links_count++;
+        ext2_write_inode(sb, new_dir->ino, new_dir_ei);
+    }
+
+    // 4. 更新 old_dir 和 new_dir 的修改时间
+    // old_dir->i_mtime = get_seconds();
+    // old_dir_ei->i_mtime = old_dir->i_mtime;
+    //ext2_write_inode(sb, old_dir->ino, old_dir_ei);
+
+    //new_dir->i_mtime = get_seconds();
+    //new_dir_ei->i_mtime = new_dir->i_mtime;
+    //ext2_write_inode(sb, new_dir->ino, new_dir_ei);
+
+    // 5. 如果移动的是目录，需要更新被移动目录本身的 .. 指向？实际上不需要，因为 .. 指向新父目录，但它的内容中 .. 项的 inode 应该更新。不过 ext2 中，移动目录时，需要修改该目录的 ".." 目录项，使其 inode 指向新的父目录。所以必须处理！
+    if (S_ISDIR(inode->mode) && old_dir != new_dir) {
+        // 需要修改被移动目录的第一个数据块中的 ".." 项
+        uint32_t block_size = fsi->block_size;
+        uint32_t phys_block = ext2_bmap(inode, 0);  // 目录的第一个块
+        if (phys_block != 0) {
+            uint8_t *block_buf = kmalloc(block_size);
+            if (block_buf) {
+                if (ext2_rw_block(sb, phys_block, block_buf,true) == 0) {
+                    struct ext2_dir_entry_2 *de = (struct ext2_dir_entry_2 *)block_buf;
+                    // 跳过 "."
+                    de = (struct ext2_dir_entry_2 *)((char *)de + de->rec_len);
+                    // 下一个应该是 ".."
+                    if (de->name_len == 2 && de->name[0] == '.' && de->name[1] == '.') {
+                        de->inode = new_dir->ino;  // 更新 ".." 的 inode 号
+                        ext2_rw_block(sb, phys_block, block_buf,false);
+                    }
+                }
+                kfree(block_buf);
+            }
+        }
+    }
 
     return 0;
 }
@@ -1159,8 +1248,67 @@ static int ext2_dir_add_entry(struct inode *dir, const char *name, uint32_t ino,
     struct ext2_inode *dir_ei = (struct ext2_inode *)dir->private_data;
     dir_ei->i_size = dir->size;
     ext2_write_inode(dir->sb, dir->ino, dir_ei);
-
     return 0;
+}
+
+static int ext2_dir_remove_entry(struct inode *dir, uint32_t ino)
+{
+    struct super_block *sb = dir->sb;
+    ext2_fs_info_t *fsi = sb->private_data;
+    uint32_t block_size = fsi->block_size;
+    uint32_t blocks = (dir->size + block_size - 1) / block_size;
+    uint8_t *block_buf = kmalloc(block_size);
+    if (!block_buf) return -1;
+
+    for (uint32_t blk = 0; blk < blocks; blk++) {
+        uint32_t phys = ext2_bmap(dir, blk);
+        if (phys == 0) continue;
+        if (ext2_rw_block(sb, phys, block_buf, true) < 0) {
+            kfree(block_buf);
+            return -1;
+        }
+        uint32_t offset = 0;
+        struct ext2_dir_entry_2 *prev = NULL;
+        while (offset < block_size) {
+            struct ext2_dir_entry_2 *de = (struct ext2_dir_entry_2 *)(block_buf + offset);
+            if (de->inode == ino) {
+                // 标记删除
+                de->inode = 0;
+                de->name_len = 0;
+                // 与前一项合并（如果前一项空闲）
+                if (prev) {
+                    prev->rec_len += de->rec_len;
+                    // 再尝试与后一项合并
+                    uint32_t next_off = offset + de->rec_len;
+                    if (next_off < block_size) {
+                        struct ext2_dir_entry_2 *next = (struct ext2_dir_entry_2 *)(block_buf + next_off);
+                        if (next->inode == 0) {
+                            prev->rec_len += next->rec_len;
+                        }
+                    }
+                } else {
+                    // 尝试与后一项合并
+                    uint32_t next_off = offset + de->rec_len;
+                    if (next_off < block_size) {
+                        struct ext2_dir_entry_2 *next = (struct ext2_dir_entry_2 *)(block_buf + next_off);
+                        if (next->inode == 0) {
+                            de->rec_len += next->rec_len;
+                        }
+                    }
+                }
+                if (ext2_rw_block(sb, phys, block_buf,false) < 0) {
+                    kfree(block_buf);
+                    return -1;
+                }
+                kfree(block_buf);
+                return 0;
+            }
+            prev = de;
+            offset += de->rec_len;
+        }
+    }
+    kfree(block_buf);
+    return -1;
 }
 
 static inode_t *ext2_iget(struct super_block *sb, uint32_t ino)
@@ -1485,7 +1633,7 @@ static int ext2_alloc_block(struct super_block *sb)
                 fsi->es.s_free_blocks_count--;   // 更新超级块
                 uint32_t bitmap_block = gd->bg_block_bitmap;
                 ext2_rw_block(sb, bitmap_block, bitmap,false);
-                uint32_t block = g * fsi->es.s_blocks_per_group + i;
+                uint32_t block = g * fsi->es.s_blocks_per_group + i + fsi->es.s_first_data_block;
                 mutex_unlock(&gd->block_lock);
                 return block;
             }
@@ -1498,9 +1646,10 @@ static int ext2_alloc_block(struct super_block *sb)
 static void ext2_free_block(struct super_block *sb, uint32_t block)
 {
     ext2_fs_info_t *fsi = sb->private_data;
-    uint32_t group = block / fsi->es.s_blocks_per_group;
-    uint32_t index = block % fsi->es.s_blocks_per_group;
-    if (group >= fsi->group_count)
+    uint32_t group = (block - fsi->es.s_first_data_block) / fsi->es.s_blocks_per_group;
+    uint32_t group_start = group * fsi->es.s_blocks_per_group + fsi->es.s_first_data_block;
+    uint32_t index = block - group_start;
+    if (group >= fsi->group_count || index >= fsi->es.s_blocks_per_group)
         return;
     ext2_group_desc_cache_t *gd = &fsi->group_descs[group];
     mutex_lock(&gd->block_lock);
@@ -1540,6 +1689,7 @@ static int ext2_alloc_inode(struct super_block *sb)
             if (!(bitmap[i/8] & (1 << (i%8)))) {
                 bitmap[i/8] |= (1 << (i%8));
                 gd->bg_free_inodes_count--;
+                fsi->es.s_free_inodes_count--;
 
                 uint32_t bitmap_block = gd->bg_inode_bitmap;
                 ext2_rw_block(sb, bitmap_block, bitmap,false);

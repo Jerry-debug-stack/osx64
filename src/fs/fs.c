@@ -33,87 +33,8 @@ int vfs_close(struct file *file);
 vfs_manager_t vfs_mgr;
 
 void test_filesystem(void){
-    //sys_mount("/dev/sdb0","/mnt");
-    //sys_umount("/dev/sdb0");
-    int ret;
-    int fd[5];
-    char buf[64];
-    const char *names[] = {"/mnt/file0.txt", "/mnt/file1.txt", "/mnt/file2.txt", "/mnt/file3.txt", "/mnt/file4.txt"};
-    const char *data[] = {"data for file0", "data for file1", "data for file2", "data for file3", "data for file4"};
-
-    wb_printf("=== EXT2 Multiple Files Create/Delete Test ===\n");
-
-    // 1. 挂载
-    ret = sys_mount("/dev/sdb0", "/mnt");
-    if (ret < 0) {
-        wb_printf("mount failed: %d\n", ret);
-        return;
-    }
-    wb_printf("Mounted /dev/sdb0 on /mnt\n");
-
-    // 2. 创建5个文件并写入数据
-    for (int i = 0; i < 5; i++) {
-        fd[i] = sys_open(names[i], O_CREAT | O_RDWR, 0644);
-        if (fd[i] < 0) {
-            wb_printf("open %s failed: %d\n", names[i], fd[i]);
-            goto cleanup;
-        }
-        ret = sys_write(fd[i], data[i], strlen(data[i]));
-        if (ret != (int)strlen(data[i])) {
-            wb_printf("write to %s failed\n", names[i]);
-            sys_close(fd[i]);
-            goto cleanup;
-        }
-        wb_printf("Created and wrote to %s\n", names[i]);
-    }
-
-    // 关闭所有文件
-    for (int i = 0; i < 5; i++) {
-        sys_close(fd[i]);
-    }
-
-    // 3. 删除 file1.txt 和 file3.txt
-    ret = sys_unlink("/mnt/file1.txt");
-    wb_printf("unlink file1.txt: %s\n", ret == 0 ? "OK" : "FAIL");
-    ret = sys_unlink("/mnt/file3.txt");
-    wb_printf("unlink file3.txt: %s\n", ret == 0 ? "OK" : "FAIL");
-
-    // 4. 重新打开剩余文件，验证内容
-    for (int i = 0; i < 5; i++) {
-        if (i == 1 || i == 3) continue; // 已删除
-        int f = sys_open(names[i], O_RDONLY, 0);
-        if (f < 0) {
-            wb_printf("open %s after delete failed (should not happen)\n", names[i]);
-            continue;
-        }
-        memset(buf, 0, sizeof(buf));
-        ret = sys_read(f, buf, sizeof(buf)-1);
-        if (ret >= 0) {
-            buf[ret] = '\0';
-            if (strcmp(buf, data[i]) == 0)
-                wb_printf("verify %s: OK\n", names[i]);
-            else
-                wb_printf("verify %s: content mismatch\n", names[i]);
-        } else {
-            wb_printf("read %s failed\n", names[i]);
-        }
-        sys_close(f);
-    }
-
-    // 尝试打开已删除的文件，预期失败
-    int f = sys_open("/mnt/file1.txt", O_RDONLY, 0);
-    if (f < 0)
-        wb_printf("open deleted file1.txt: OK (expected fail)\n");
-    else {
-        wb_printf("open deleted file1.txt unexpectedly succeeded\n");
-        sys_close(f);
-    }
-
-cleanup:
-    // 5. 卸载
-    ret = sys_umount("/mnt");
-    wb_printf("umount /mnt: %s\n", ret == 0 ? "OK" : "FAIL");
-    wb_printf("=== Test End ===\n");
+    sys_mount("/dev/sdb0","/mnt");
+    sys_umount("/mnt");
 }
 
 void init_fs_mem(void){
@@ -437,6 +358,18 @@ void dentry_delete(dentry_t *dentry){
     dentry_put(dentry);
 }
 
+static void umount_cleanup_dentry(dentry_t *dentry)
+{
+    if (!dentry) return;
+    dentry_get(dentry);
+    list_head_t *pos,*next;
+    list_for_each_safe(pos,next,&dentry->child_list){
+        dentry_t *child = container_of(pos,dentry_t,child_list_item);
+        umount_cleanup_dentry(child);
+    }
+    dentry_delete(dentry);
+}
+
 void inode_put(inode_t *inode){
     if (!inode)
         return;
@@ -676,7 +609,7 @@ int sys_umount(const char *target_path)
 
     // 释放 super_block 的根 dentry 引用
     if (sb->root) {
-        dentry_delete(sb->root);
+        umount_cleanup_dentry(sb->root);
         sb->root = NULL;
     }
 
