@@ -16,7 +16,7 @@ global AlignmentCheck,MachineCheck,SIMDException,VirtualizationException,StackSe
 global intr0,intr1,intr2,intr3,intr4,intr5,intr6,intr7,intr8,intr9,intr10,intr11,intr12,intr13,intr14,intr15,intr16,intr17,intr18,intr19,intr20,intr21,intr22,intr23
 global intr2_bsp
 global syscall_enter
-global task_switch,asm_task_start,asm_task_start_go_out
+global task_switch_unlock,task_switch_double_unlock,asm_task_start,asm_task_start_go_out
 
 extern cstart,exception_handler
 extern intr_handler,timer_intr_soft_bsp
@@ -451,6 +451,7 @@ section .text64high
         mov rsp, rdi
         pop rbx
         pop rbp
+        pop r12
         pop r13
         pop r14
         pop r15
@@ -459,18 +460,49 @@ section .text64high
     asm_task_start_go_out:
         go_out
 
-    task_switch:
+    task_switch_unlock:
         push r15
         push r14
         push r13
+        push r12
         push rbp
         push rbx
         ;保存栈的位置
         mov [rdi],rsp
+        dec dword[rcx]
+        sfence
+        mov dword[rdx],0
+        sfence
         ;读取另一个栈
         mov rsp,[rsi]
         pop rbx
         pop rbp
+        pop r12
+        pop r13
+        pop r14
+        pop r15
+        ret
+    
+    task_switch_double_unlock:
+        push r15
+        push r14
+        push r13
+        push r12
+        push rbp
+        push rbx
+        ;保存栈的位置
+        mov [rdi],rsp
+        sub dword[rcx],2
+        sfence
+        mov dword[rdx],0
+        sfence
+        mov dword[r8],0
+        sfence
+        ;读取另一个栈
+        mov rsp,[rsi]
+        pop rbx
+        pop rbp
+        pop r12
         pop r13
         pop r14
         pop r15

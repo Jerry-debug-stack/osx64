@@ -354,27 +354,26 @@ typedef struct {
 #include "lib/safelist.h"
 
 typedef struct ahci_request {
-
     uint64_t lba;
     uint32_t count;
     void* buffer;
     uint8_t write;
     int slot;
     int finished;
-    int status;        // 0 success, <0 error
-    pcb_t* waiter;
-    struct ahci_request* next;
+    int status;              // 0 成功，<0 错误码
+    uint64_t cr3;
+    wait_queue_t wq;
+    list_head_t list;
 } ahci_request_t;
 
 typedef struct {
     hba_mem_t* hba;
     hba_port_t* port;
     uint8_t port_no;
-    ahci_request_t* req_head;
-    ahci_request_t* req_tail;
-    ahci_request_t* active[32];  // 每个 slot 当前请求
-    spinlock_t lock;
-    ahci_identify_t indentify;
+    list_head_t req_queue;            // 等待处理的请求队列（链表头）
+    ahci_request_t* active[32];       // 每个 slot 当前正在执行的请求
+    spinlock_t lock;                  // 保护设备所有数据
+    ahci_identify_t identify;
 } ahci_device_t;
 
 typedef struct {

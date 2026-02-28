@@ -14,7 +14,10 @@ static inline void wait_queue_init(wait_queue_t *wq)
     INIT_LIST_HEAD(&wq->list);
 }
 
+void init_wait_queue(wait_queue_t *wq);
+void sleep_on_locked(wait_queue_t *wq);
 void wake_up_all(wait_queue_t *wq);
 void sleep_on(wait_queue_t *wq);
+void wake_up_first(wait_queue_t *wq);
 
 #endif

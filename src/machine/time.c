@@ -50,6 +50,11 @@ void timer_intr_soft(void){
         return;
     }
     cpu->time_intr_reenter++;
+    pcb_t *current = cpu->now_running;
+    if (current->preempt_count){
+        cpu->time_intr_reenter--;
+        return;
+    }
     /* 调度请求标志 */
     bool need_schedule = true;
     /* step 1 处理本地时钟 */ 
@@ -59,10 +64,6 @@ void timer_intr_soft(void){
         load_balance(id);
     }
     /* step 3 考虑是否需要调度 */
-    pcb_t *current = cpu->now_running;
-    if (current->preempt_count){
-        need_schedule = false;
-    }
     /* 这里保留作以后处理 */
     __asm__ __volatile__("sti");
     /* 下半段 */
@@ -75,9 +76,10 @@ void timer_intr_soft(void){
             spin_lock(&cpu->ready_list.lock);
             list_add_tail(&current->ready_list_item,&cpu->ready_list.list);
             cpu->total_ready_num++;
-            spin_unlock(&cpu->ready_list.lock);
+            __schedule_locked(0);
+        }else{
+            schedule();
         }
-        schedule();
     }
     /* 判断信号递送 */
 

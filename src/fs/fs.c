@@ -33,7 +33,7 @@ int vfs_close(struct file *file);
 vfs_manager_t vfs_mgr;
 
 void test_filesystem(void){
-    sys_mount("/dev/sdb0","/mnt");
+    sys_mount("/dev/sdb1","/mnt");
     sys_umount("/mnt");
 }
 
@@ -317,7 +317,10 @@ dentry_t *dentry_create(const char *name,inode_t *inode){
     if (inode){
         d->inode = inode;
         inode_get(inode);
+    }else{
+        d->inode = NULL;
     }
+
     return d;
 }
 

@@ -11,7 +11,8 @@
 extern GLOBAL_CPU *cpus;
 
 extern void asm_task_start_go_out(void);
-extern void task_switch(pcb_t *old,pcb_t *new);
+extern void task_switch_unlock(pcb_t *old,pcb_t *new,spinlock_t *lock, int *preempt_count);
+extern void task_switch_double_unlock(pcb_t *old,pcb_t *new,spinlock_t *lock, int *preempt_count,spinlock_t *wq_lock);
 extern _Noreturn void asm_task_start(uint64_t rsp);
 
 extern void init(void);
@@ -181,11 +182,9 @@ static inline void switch_cr3_if_needed(pcb_t *will_run)
     );
 }
 
-void schedule(void){
-    uint32_t intr = io_cli();
+void __schedule_locked(uint8_t intr){
     uint32_t id = get_logic_cpu_id();
     CPU_ITEM *item = &cpus->items[id];
-    spin_lock(&item->ready_list.lock);
     pcb_t *will_run,*before_run = item->now_running;
     if (item->ready_list.list.next != &item->ready_list.list){
         list_head_t* next_ = item->ready_list.list.next;
@@ -199,9 +198,40 @@ void schedule(void){
     will_run->cpuid = id;
     item->now_running = will_run;
     will_run->state = TASK_STATE_RUNNING;
-    spin_unlock(&item->ready_list.lock);
-    task_switch(before_run,will_run);
+    item->tss->rsp0 = (uint64_t)will_run + DEFAULT_PCB_SIZE;
+    task_switch_unlock(before_run,will_run,&item->ready_list.lock,&before_run->preempt_count);
     io_set_intr(intr);
+}
+
+void __schedule_other_locked(spinlock_t *wq_lock){
+    uint8_t intr = io_cli();
+    uint32_t id = get_logic_cpu_id();
+    CPU_ITEM *item = &cpus->items[id];
+    pcb_t *will_run,*before_run = item->now_running;
+    spin_lock(&item->ready_list.lock);
+    if (item->ready_list.list.next != &item->ready_list.list){
+        list_head_t* next_ = item->ready_list.list.next;
+        list_del_init(next_);
+        will_run = container_of(next_,pcb_t,ready_list_item);
+        item->total_ready_num--;
+    }else{
+        will_run = item->idle;
+    }
+    switch_cr3_if_needed(will_run);
+    will_run->cpuid = id;
+    item->now_running = will_run;
+    will_run->state = TASK_STATE_RUNNING;
+    item->tss->rsp0 = (uint64_t)will_run + DEFAULT_PCB_SIZE;
+    task_switch_double_unlock(before_run,will_run,&item->ready_list.lock,&before_run->preempt_count,wq_lock);
+    io_set_intr(intr);
+}
+
+void schedule(void){
+    uint8_t intr = io_cli();
+    uint32_t id = get_logic_cpu_id();
+    CPU_ITEM *cpu = &cpus->items[id];
+    spin_lock(&cpu->ready_list.lock);
+    __schedule_locked(intr);
 }
 
 static inline _Noreturn void schedule_zombie(){
@@ -289,7 +319,6 @@ pcb_t *get_current(void){
 }
 
 void put_to_ready_list_first(pcb_t *task){
-    uint8_t intr = io_cli();
     uint32_t cpuid = task->cpuid;
     CPU_ITEM *cpu = &cpus->items[cpuid];
     task->state = TASK_STATE_READY;
@@ -297,7 +326,6 @@ void put_to_ready_list_first(pcb_t *task){
     list_add(&task->ready_list_item,&cpu->ready_list.list);
     cpu->total_ready_num++;
     spin_unlock(&cpu->ready_list.lock);
-    io_set_intr(intr);
 }
 
 static void free_task(pcb_t *task){
@@ -315,15 +343,18 @@ void yield(void){
     current->state = TASK_STATE_READY;
     list_add_tail(&current->ready_list_item,&cpus->items[id].ready_list.list);
     cpu->total_ready_num++;
-    spin_unlock(&cpu->ready_list.lock);
-    schedule();
-    io_set_intr(intr);
+    __schedule_locked(intr);
 }
 
 void ahci_kernel_thread(void);
+void stress_thread(void);
 
 void put_ahci_thread(void){
     kernel_thread("ahci",ahci_kernel_thread,pcb_of_init,0);
+    for (int i = 0; i < 20; i++)
+    {
+        kernel_thread("stress", stress_thread,pcb_of_init,i % 2);
+    }
 }
 
 int init_cwd_for_started_tasks(struct dentry *root){

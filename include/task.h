@@ -67,20 +67,23 @@ typedef struct registers {
 
 /// @brief task启动时的栈（或者是schedule时的栈）
 typedef struct task_start {
-    uint64_t rbx,rbp,r13,r14,r15,ret;
+    uint64_t rbx,rbp,r12,r13,r14,r15,ret;
 } task_start_t;
 
 pcb_t *get_current(void);
 void put_to_ready_list_first(pcb_t *task);
 pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n);
 void schedule(void);
+void __schedule_locked(uint8_t intr);
+void __schedule_other_locked(spinlock_t *wq_lock);
 void yield(void);
-void put_to_ready_list_first(pcb_t *task);
 static inline void preempt_disable(void) {
-    get_current()->preempt_count++;
+    pcb_t *current = get_current();
+    current->preempt_count++;
 }
 static inline void preempt_enable(void) {
-    get_current()->preempt_count--;
+    pcb_t *current = get_current();
+    current->preempt_count--;
 }
 
 extern pcb_t *pcb_of_init;

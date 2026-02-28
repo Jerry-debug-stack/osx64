@@ -46,6 +46,16 @@ uint8_t spin_lock_irq_save(spinlock_t *lock){
     return intr;
 }
 
+void spin_lock_irq_able(spinlock_t *lock){
+    spin_lock(lock);
+    preempt_enable();
+}
+
+void spin_unlock_irq_able(spinlock_t *lock){
+    preempt_disable();
+    spin_unlock(lock);
+}
+
 /* ====================== 互斥锁实现 ====================== */
 
 /* 等待队列节点 */
@@ -78,14 +88,12 @@ void mutex_lock(mutex_t *lock)
     spin_lock(&lock->queue_lock);
     
     if (lock->locked) {
-        /* 添加到等待队列尾部 */
+        uint32_t intr = io_cli();
+        pcb_t *current = get_current();
         list_add_tail(&wait.list, &lock->wait_queue);
-        
-        wait.task->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
-        
-        /* 释放队列锁并调度其他任务 */
-        spin_unlock(&lock->queue_lock);
-        schedule();
+        current->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
+        __schedule_other_locked(&lock->queue_lock);
+        io_set_intr(intr);
         
         /* 被唤醒后，重新尝试获取锁 */
         while (__sync_lock_test_and_set(&lock->locked, 1)) {

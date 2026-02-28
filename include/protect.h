@@ -36,21 +36,30 @@ typedef struct CPUCore {
 #define INT_S_CTLMASK 0xA1 /* setting bits in this port disables ints   <Slave>  */
 
 typedef struct tss {
-    unsigned int reserved0;
-    unsigned int rsp0_low, rsp0_high;
-    unsigned int rsp1_low, rsp1_hign;
-    unsigned int rsp2_low, rsp2_high;
-    unsigned int reserved1_low, reserved1_high;
-    unsigned int ist1_low, ist1_high;
-    unsigned int ist2_low, ist2_high;
-    unsigned int ist3_low, ist3_high;
-    unsigned int ist4_low, ist4_high;
-    unsigned int ist5_low, ist5_high;
-    unsigned int ist6_low, ist6_high;
-    unsigned int ist7_low, int7_high;
-    unsigned int reserved2_low, reserved2_high;
-    unsigned int reserved3_low, reserved3_high, ioMAP;
-} __attribute__((packed)) TSS;
+    uint32_t reserved0;
+
+    /* RSP stacks used when privilege level changes */
+    uint64_t rsp0;
+    uint64_t rsp1;
+    uint64_t rsp2;
+
+    uint64_t reserved1;
+
+    /* Interrupt Stack Table */
+    uint64_t ist1;
+    uint64_t ist2;
+    uint64_t ist3;
+    uint64_t ist4;
+    uint64_t ist5;
+    uint64_t ist6;
+    uint64_t ist7;
+
+    uint64_t reserved2;
+    uint16_t reserved3;
+
+    /* I/O bitmap offset */
+    uint16_t io_map_base;
+} __attribute__((packed)) tss_t;
 
 // Access Byte
 #define ACCESS_PRESENT 1 << 15

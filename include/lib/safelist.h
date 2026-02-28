@@ -32,7 +32,8 @@ void spin_lock(spinlock_t *lock);
 void spin_unlock(spinlock_t *lock);
 int spin_trylock(spinlock_t *lock);
 uint8_t spin_lock_irq_save(spinlock_t *lock);
-
+void spin_lock_irq_able(spinlock_t *lock);
+void spin_unlock_irq_able(spinlock_t *lock);
 /* 互斥锁操作 */
 void mutex_init(mutex_t *lock);
 void mutex_lock(mutex_t *lock);

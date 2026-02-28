@@ -4,6 +4,11 @@
 #include "task.h"
 #include "lib/io.h"
 
+void init_wait_queue(wait_queue_t *wq){
+    spin_lock_init(&wq->lock);
+    INIT_LIST_HEAD(&wq->list);
+}
+
 void sleep_on(wait_queue_t *wq)
 {
     uint32_t intr = io_cli();
@@ -11,8 +16,17 @@ void sleep_on(wait_queue_t *wq)
     spin_lock(&wq->lock);
     list_add_tail(&current->wait_list_item, &wq->list);
     current->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
-    spin_unlock(&wq->lock);
-    schedule();
+    __schedule_other_locked(&wq->lock);
+    io_set_intr(intr);
+}
+
+void sleep_on_locked(wait_queue_t *wq)
+{
+    uint32_t intr = io_cli();
+    pcb_t *current = get_current();
+    list_add_tail(&current->wait_list_item, &wq->list);
+    current->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
+    __schedule_other_locked(&wq->lock);
     io_set_intr(intr);
 }
 
@@ -23,7 +37,17 @@ void wake_up_all(wait_queue_t *wq)
         list_head_t *pos = wq->list.next;
         list_del_init(pos);
         pcb_t *task = container_of(pos, pcb_t, wait_list_item);
-        task->state = TASK_STATE_READY;
+        put_to_ready_list_first(task);
+    }
+    spin_unlock(&wq->lock);
+}
+
+void wake_up_first(wait_queue_t *wq){
+    spin_lock(&wq->lock);
+    if (!list_empty(&wq->list)){
+        list_head_t *pos = wq->list.next;
+        list_del_init(pos);
+        pcb_t *task = container_of(pos, pcb_t, wait_list_item);
         put_to_ready_list_first(task);
     }
     spin_unlock(&wq->lock);

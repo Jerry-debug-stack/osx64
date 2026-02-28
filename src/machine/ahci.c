@@ -29,13 +29,19 @@ static void ahci_register_device(hba_mem_t *hba, int port_no)
     d->port = &hba->ports[port_no];
     d->port_no = port_no;
     
-    ahci_send(&hba->ports[port_no], 0, 1, &d->indentify, COMMAND_IDENTIFY, 0, 0);
+    ahci_send(&hba->ports[port_no], 0, 1, &d->identify, COMMAND_IDENTIFY, 0, 0);
     while (1) {
         if ((hba->ports[port_no].ci & 1) == 0)
             break;
     }
 
     spin_lock_init(&d->lock);
+    INIT_LIST_HEAD(&d->req_queue);
+    for (uint32_t i = 0; i < 32; i++)
+    {
+        d->active[i] = NULL;
+    }
+
     ahci_mgr.count++;
     init_command_fis_list(hba,port_no);
     wb_printf("[ AHCI  ] registered device at port %d\n", port_no);
@@ -68,93 +74,68 @@ void *init_ahci_disk(int pcie_addr)
     return (void *)0;
 }
 
-void ahci_kernel_thread(void)
-{
-    while (1)
-    {
-        for (int i = 0; i < ahci_mgr.count; i++)
-        {
+void ahci_kernel_thread(void) {
+    while (1) {
+        for (int i = 0; i < ahci_mgr.count; i++) {
             ahci_device_t *dev = &ahci_mgr.dev[i];
-            
-            pcb_t *to_wake[32];
-            int wakecnt = 0;
-            
+
             spin_lock(&dev->lock);
-            for (int s = 0; s < 32; s++)
-            {
+
+            // 检查完成
+            for (int s = 0; s < 32; s++) {
                 ahci_request_t *req = dev->active[s];
-                if (!req)
-                    continue;
-                if (!(dev->port->ci & (1 << s)))
-                {
+                if (!req) continue;
+                if (!(dev->port->ci & (1 << s))) {
                     req->finished = 1;
                     req->status = 0;
                     dev->active[s] = NULL;
-                    pcb_t *task = req->waiter;
-                    task->state = TASK_STATE_READY;
-                    if (req->waiter)
-                        to_wake[wakecnt++] = req->waiter;
+                    wake_up_all(&req->wq);
                 }
             }
-            for (int s = 0; s < 32; s++)
-            {
-                if (dev->active[s])
-                    continue;
-                if (!dev->req_head)
-                    break;
-                ahci_request_t *req = dev->req_head;
-                dev->req_head = req->next;
-                if (!dev->req_head)
-                    dev->req_tail = NULL;
-                req->slot = s;
+
+            // 启动新请求
+            for (int s = 0; s < 32; s++) {
+                if (dev->active[s]) continue;
+                if (list_empty(&dev->req_queue)) break;
+                
+                list_head_t *first = dev->req_queue.next;
+                list_del_init(first);
+                ahci_request_t *req = container_of(first, ahci_request_t, list);
                 dev->active[s] = req;
-                ahci_send(dev->port,
-                          req->lba,
-                          req->count,
-                          req->buffer,
-                          req->write ? COMMAND_WRITE_LBA48 : COMMAND_READ_LBA48,
-                          s,
-                          req->waiter->cr3);
+                req->slot = s;
+                ahci_send(
+                    dev->port, req->lba, req->count, req->buffer,
+                    req->write ? COMMAND_WRITE_LBA48 : COMMAND_READ_LBA48,
+                    s, req->cr3
+                );
             }
             spin_unlock(&dev->lock);
-            for (int k = 0; k < wakecnt; k++)
-            {
-                pcb_t *task = to_wake[k];
-                if (!task) continue;
-                task->state = TASK_STATE_READY;
-                put_to_ready_list_first(task);
-            }
         }
-        yield(); // 让出 CPU
+        yield();
     }
 }
 
-int ahci_submit(ahci_device_t *dev, uint64_t lba, uint32_t count, void *buf, int write)
-{
+int ahci_submit(ahci_device_t *dev, uint64_t lba, uint32_t count, void *buf, int write) {
     ahci_request_t *req = kmalloc(sizeof(*req));
+    if (!req) return -1;
     memset(req, 0, sizeof(*req));
 
     req->lba = lba;
     req->count = count;
     req->buffer = buf;
     req->write = write;
-    req->waiter = get_current();
+    req->cr3 = get_current()->cr3;
     req->finished = 0;
+    init_wait_queue(&req->wq);
 
+    // 将请求加入设备队列（受设备锁保护）
     spin_lock(&dev->lock);
-    // 入队
-    if (!dev->req_head)
-        dev->req_head = dev->req_tail = req;
-    else {
-        dev->req_tail->next = req;
-        dev->req_tail = req;
-    }
-    // 关键：在锁内标记睡眠
-    req->waiter->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
+    spin_lock(&req->wq.lock);
+    list_add_tail(&req->list, &dev->req_queue);
     spin_unlock(&dev->lock);
-    // condition wait
-    while (!req->finished)
-        schedule();
+    
+    sleep_on_locked(&req->wq);
+
     int status = req->status;
     kfree(req);
     return status;
@@ -390,7 +371,7 @@ static int ahci_block_write(block_device_t *bdev,uint64_t lba,uint32_t count,con
 static void ahci_register_block_device(ahci_device_t *adev)
 {
     block_device_t *bdev = kmalloc(sizeof(real_device_t));
-    bdev->total_blocks = adev->indentify.lba_sectors_48;
+    bdev->total_blocks = adev->identify.lba_sectors_48;
     bdev->block_size = 512;
     bdev->private_data = adev;
     bdev->type = BLOCK_DISK;

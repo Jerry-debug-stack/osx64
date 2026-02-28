@@ -192,7 +192,7 @@ static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int ind
     part->device.write        = partition_write;
     part->device.private_data = part;
 
-    sprintf(&part->device.name[0],"%s%d",18,&part->parent->name[0],index);
+    sprintf(&part->device.name[0],"%s%d",18,&part->parent->name[0],index + 1);
 
     block_register(&part->device,locked);
 

@@ -70,12 +70,12 @@ void init_protect(uint8_t is_bsp)
     uint64_t* idt_table = cpu->idt_table = kmalloc(4096);
     uint32_t* gdt_ptr = cpu->gdt_ptr = kmalloc(16);
     uint32_t* idt_ptr = cpu->idt_ptr = kmalloc(32);
-    uint32_t* tss = cpu->tss = kmalloc(132);
+    tss_t* tss = cpu->tss = kmalloc(sizeof(tss_t));
     memset(gdt_table, 0, 64);
     memset(idt_table, 0, 4096);
     memset(gdt_ptr, 0, 16);
     memset(idt_ptr, 0, 32);
-    memset(tss, 0, 132);
+    memset(tss, 0, sizeof(tss_t));
     gdt_table[1] = ((uint64_t)(ACCESS_ACCESSED | ACCESS_CODE_DATA | ACCESS_CODE | ACCESS_CODE_READABLE | ACCESS_PRESENT | FLAGS_LOOG | ACCESS_SYSTEM)) << 32;
     gdt_table[2] = ((uint64_t)(ACCESS_ACCESSED | ACCESS_CODE_DATA | ACCESS_DATA | ACCESS_DATA_WRITABLE | ACCESS_PRESENT | ACCESS_DIRECTION_UP | FLAGS_LOOG | ACCESS_SYSTEM)) << 32;
     gdt_table[3] = ((uint64_t)(ACCESS_ACCESSED | ACCESS_CODE_DATA | ACCESS_CODE | ACCESS_CODE_READABLE | ACCESS_PRESENT | FLAGS_LOOG | ACCESS_DPL3)) << 32;
@@ -138,8 +138,7 @@ void init_protect(uint8_t is_bsp)
     }
     
     uint64_t* phy_addr = (uint64_t*)(alloc_page_4k() + 0x1000);
-    ((TSS*)tss)->ist1_low = (uint32_t)((uint64_t)easy_phy2linear(phy_addr) & 0xffffffff);
-    ((TSS*)tss)->ist1_high = (uint32_t)((uint64_t)easy_phy2linear(phy_addr) >> 32);
+    tss->ist1 = (uint64_t)phy_addr;
     load_protect(gdt_ptr, idt_ptr);
 }
 

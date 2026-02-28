@@ -5,6 +5,9 @@
 #include "const.h"
 #include "lib/my_list.h"
 #include "task.h"
+#include "protect.h"
+
+#include <stdint.h>
 
 typedef struct
 {
@@ -12,7 +15,7 @@ typedef struct
     uint64_t *idt_table;
     uint32_t *gdt_ptr;
     uint32_t *idt_ptr;
-    uint32_t *tss;
+    tss_t *tss;
     pcb_t* now_running;
     pcb_t* idle;
     volatile uint32_t total_ready_num;
