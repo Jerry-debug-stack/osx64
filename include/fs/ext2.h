@@ -9,7 +9,8 @@
  * 超级块魔数
  */
 #define EXT2_SUPER_MAGIC    0xEF53
-
+#define EXT2_MAGIC_OFFSET   0x38
+#define EXT2_UUID_OFFSET    0x68
 /*
  * 扩展2文件系统版本
  */

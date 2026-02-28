@@ -2,6 +2,7 @@
 #define OS_BLOCK_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "lib/safelist.h"
 
 #define BLOCK_DEV_MAX 32
@@ -35,6 +36,7 @@ typedef struct partition
     uint64_t sector_count;
     uint8_t bootable;
     uint8_t part_type;
+    char *uuid;
     struct super_block *mounted_sb;
 } partition_t;
 
@@ -78,5 +80,8 @@ typedef struct {
 #define PARTITION_LINUX 0x83
 #define FS_TYPE_RAMFS  0x1001
 #define FS_TYPE_DEVFS  0x1002
+
+int partition_read(block_device_t *dev,uint64_t lba,uint32_t cnt,void *buf);
+int partition_write(block_device_t *dev,uint64_t lba,uint32_t cnt,const void *buf);
 
 #endif

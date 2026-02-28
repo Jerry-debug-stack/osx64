@@ -7,6 +7,7 @@
 MULTIBOOT_INFO* global_multiboot_info;
 
 void init_mm(MULTIBOOT_INFO* info);
+void parse_cmd_line(MULTIBOOT_INFO *info);
 void init_view(MULTIBOOT_INFO* info);
 void init_protect(uint8_t is_bsp);
 void init_apic_bsp(void);
@@ -39,13 +40,14 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
     global_multiboot_info = easy_phy2linear((uint64_t)info & 0xffffffff);
     init_mm(global_multiboot_info);
     init_view(global_multiboot_info);
+    parse_cmd_line(info);
     init_acpi_madt();
     init_apic_bsp();
     color_print("[SYSTEM ] apic ready\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
     init_protect(1);
     init_task();
     init_time();
-    //init_keyboard();
+    init_keyboard();
     color_print("[SYSTEM ] task ready\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
     multi_core_start = true;
     init_ap();
@@ -53,7 +55,8 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
 }
 
 
-void test_filesystem();
+void mount_root();
+void put_tty_thread(void);
 
 void init(void){
     color_print("[SYSTEM ] enter init progress!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
@@ -62,7 +65,9 @@ void init(void){
     enumerate_pcie_devices();
     put_ahci_thread();
     read_partitions();
-    test_filesystem();
+    mount_root();
+
+    put_tty_thread();
 
     while (1)
     {

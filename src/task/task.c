@@ -347,14 +347,15 @@ void yield(void){
 }
 
 void ahci_kernel_thread(void);
-void stress_thread(void);
 
 void put_ahci_thread(void){
     kernel_thread("ahci",ahci_kernel_thread,pcb_of_init,0);
-    for (int i = 0; i < 20; i++)
-    {
-        kernel_thread("stress", stress_thread,pcb_of_init,i % 2);
-    }
+}
+
+void tty_task(void *arg);
+
+void put_tty_thread(void){
+    kernel_thread("tty0",tty_task,pcb_of_init,0);
 }
 
 int init_cwd_for_started_tasks(struct dentry *root){

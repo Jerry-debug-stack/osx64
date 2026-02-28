@@ -31,11 +31,7 @@ ssize_t vfs_write(struct file *file, const char *buf, size_t count);
 int vfs_close(struct file *file);
 
 vfs_manager_t vfs_mgr;
-
-void test_filesystem(void){
-    sys_mount("/dev/sdb1","/mnt");
-    sys_umount("/mnt");
-}
+char rootuuid[37] = "?";
 
 void init_fs_mem(void){
     init_block();
@@ -58,6 +54,7 @@ static inline void init_vfs_mgr(void){
         halt();
     }
     sys_mkdir("/mnt",0755);
+    sys_mkdir("/root",0755);
 
     int total_ref = init_cwd_for_started_tasks(vfs_mgr.root);
     atomic_add(total_ref,&vfs_mgr.root->refcount);

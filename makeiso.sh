@@ -19,6 +19,7 @@ parted $IMG set 1 boot on
 # 设置环回设备
 LOOP=$(sudo losetup -Pf --show $IMG)
 sudo mkfs.ext2 ${LOOP}p1
+sudo mkfs.ext2 ${LOOP}p2
 
 # 挂载
 mkdir -p $MOUNT

@@ -4,6 +4,7 @@
 #include "mm/mm.h"
 #include "const.h"
 #include "lib/string.h"
+#include "view/view.h"
 
 static int ext2_create(struct inode *dir, struct dentry *dentry, int mode);
 static int ext2_delete(struct inode *dir);
@@ -74,6 +75,48 @@ super_operations_t ext2_super_ops = {
     .put_super = ext2_put_super,
 };
 
+static void uuid_to_string(uint8_t *uuid, char *out) {
+    // 十六进制字符表
+    const char hex[] = "0123456789abcdef";
+    int pos = 0;
+
+    for (int i = 0; i < 16; i++) {
+        // 取当前字节的高 4 位和低 4 位
+        uint8_t high = uuid[i] >> 4;   // 高半字节
+        uint8_t low  = uuid[i] & 0x0F; // 低半字节
+
+        // 转换为字符并存入缓冲区
+        out[pos++] = hex[high];
+        out[pos++] = hex[low];
+
+        // 在特定位置插入连字符（标准 UUID 格式：8-4-4-4-12）
+        if (i == 3 || i == 5 || i == 7 || i == 9) {
+            out[pos++] = '-';
+        }
+    }
+
+    out[36] = '\0';  // 字符串结束符
+}
+
+void ext2_read_uuid(partition_t *part){
+    uint8_t *buf = kmalloc(1024);
+    if (!buf)
+        return;
+    if (partition_read(&part->device,2,2,buf))
+        goto end;
+    uint16_t magic = *(uint16_t *)(buf + EXT2_MAGIC_OFFSET);
+    if (magic != EXT2_SUPER_MAGIC)
+        goto end;
+    uint8_t *uuid = buf + EXT2_UUID_OFFSET;
+    part->uuid = kmalloc(40);
+    if (!part->uuid)
+        goto end;
+    uuid_to_string(uuid,part->uuid);
+end:
+    kfree(buf);
+    return;
+}
+
 
 static inode_t *ext2_read_root_inode(struct super_block *sb){
     if (!sb || !sb->part)
@@ -114,7 +157,32 @@ static int ext2_write_super(struct super_block *sb) {
     return 0;
 }
 
-static int ext2_sync_fs(UNUSED struct super_block *sb) {return 0;}
+static int ext2_sync_fs(UNUSED struct super_block *sb) {
+    ext2_fs_info_t *fsi = sb->private_data;
+    uint32_t block_size = fsi->block_size;
+    uint32_t descs_per_block = block_size / sizeof(struct ext2_group_desc);
+    uint32_t first_desc_block = (block_size == 1024) ? 2 : 1;
+    uint8_t *desc_block_buf = kmalloc(block_size);
+    if (desc_block_buf) {
+        for (uint32_t g = 0; g < fsi->group_count; g++) {
+            ext2_group_desc_cache_t *gd = &fsi->group_descs[g];
+                uint32_t block_idx = first_desc_block + g / descs_per_block;
+                uint32_t offset = (g % descs_per_block) * sizeof(struct ext2_group_desc);
+                if (ext2_rw_block(sb, block_idx, desc_block_buf,true) == 0) {
+                    struct ext2_group_desc *desc = (struct ext2_group_desc *)(desc_block_buf + offset);
+                    // 更新字段
+                    desc->bg_free_blocks_count = gd->bg_free_blocks_count;
+                    desc->bg_free_inodes_count = gd->bg_free_inodes_count;
+                    desc->bg_used_dirs_count = gd->bg_used_dirs_count;
+                    // 写回
+                    ext2_rw_block(sb, block_idx, desc_block_buf,false);
+                }
+        }
+        kfree(desc_block_buf);
+    }
+    ext2_write_super(sb);
+    return 0;
+}
 
 static void ext2_put_super(struct super_block *sb) {
     ext2_fs_info_t *fsi = sb->private_data;

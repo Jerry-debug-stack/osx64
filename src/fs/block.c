@@ -10,6 +10,8 @@
 
 static block_manager_t block_mgr;
 
+extern void ext2_read_uuid(partition_t *part);
+
 static int block_file_open(UNUSED struct inode *inode,UNUSED struct file *file);
 static int block_file_release(UNUSED struct inode *inode,UNUSED struct file *file);
 static ssize_t block_file_read(struct file *file, char __user *buf,size_t len, int64_t *ppos);
@@ -110,7 +112,7 @@ static inline void disk_index_to_name(uint64_t index, char *buf)
     buf[j] = '\0';
 }
 
-static int partition_read(block_device_t *dev,uint64_t lba,uint32_t cnt,void *buf)
+int partition_read(block_device_t *dev,uint64_t lba,uint32_t cnt,void *buf)
 {
     if (dev->type == BLOCK_PARTITION){
         partition_t *part = (partition_t *)dev;
@@ -122,7 +124,7 @@ static int partition_read(block_device_t *dev,uint64_t lba,uint32_t cnt,void *bu
     }
 }
 
-static int partition_write(block_device_t *dev,uint64_t lba,uint32_t cnt,const void *buf)
+int partition_write(block_device_t *dev,uint64_t lba,uint32_t cnt,const void *buf)
 {
     if (dev->type == BLOCK_PARTITION){
         partition_t *part = (partition_t *)dev;
@@ -170,6 +172,17 @@ static int block_file_readdir(UNUSED struct file *file, UNUSED struct dirent __u
     return -1;
 }
 
+static void read_uuid(partition_t *part){
+    switch (part->part_type)
+    {
+    case PARTITION_LINUX:
+        ext2_read_uuid(part);
+        return;
+    default:
+        return;
+    }
+}
+
 static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int index,bool locked)
 {
     if (ent->sector_count == 0)
@@ -184,6 +197,7 @@ static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int ind
     part->part_type    = ent->type;
     part->bootable     = ent->bootable;
     part->mounted_sb   = NULL;
+    part->uuid         = NULL;
 
     part->device.type         = BLOCK_PARTITION;
     part->device.block_size   = disk->block_size;
@@ -196,11 +210,15 @@ static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int ind
 
     block_register(&part->device,locked);
 
-    wb_printf("[  MBR  ] loaded primary partition %s start=%u sectors=%u type=0x%x\n",
-           part->device.name,
-           ent->start_lba,
-           ent->sector_count,
-           ent->type);
+    read_uuid(part);
+
+    wb_printf("[  MBR  ] loaded primary partition %s start=%u sectors=%u type=0x%x uuid=%s \n",
+        part->device.name,
+        ent->start_lba,
+        ent->sector_count,
+        ent->type,
+        part->uuid ? part->uuid : "unknown"
+    );
 }
 
 static int is_extended_type(uint8_t type)
@@ -247,6 +265,7 @@ static void scan_extended(block_device_t* disk,uint32_t ext_base_lba,bool locked
             part->part_type    = part_entry->type;
             part->bootable     = part_entry->bootable;
             part->mounted_sb   = NULL;
+            part->uuid         = NULL;
 
             part->device.type         = BLOCK_PARTITION;
             part->device.block_size   = disk->block_size;
@@ -256,7 +275,16 @@ static void scan_extended(block_device_t* disk,uint32_t ext_base_lba,bool locked
             part->device.private_data = part;
             sprintf(part->device.name,"%s%d",(uint32_t)sizeof(part->device.name),disk->name,logical_index++);
             block_register(&part->device,locked);
-            wb_printf("[  MBR  ] loaded logical partition %s start=%u size=%u type=0x%x\n",part->device.name,abs_start,part_entry->sector_count,part_entry->type);
+
+            read_uuid(part);
+
+            wb_printf("[  MBR  ] loaded logical partition %s start=%u size=%u type=0x%x uuid=%s\n",
+                part->device.name,
+                abs_start,
+                part_entry->sector_count,
+                part_entry->type,
+                part->uuid ? part->uuid : "unknown"
+            );
         }
         if (next_entry->type == 0 ||
             next_entry->sector_count == 0)
@@ -312,4 +340,29 @@ int mbr_scan(block_device_t* disk,bool locked)
         }
     }
     return 0;
+}
+
+extern char rootuuid[37];
+
+void mount_root(void){
+    block_device_t *dev;
+    partition_t *target = NULL; 
+    list_for_each_entry(dev,&block_mgr.block_list.list,global_list){
+        if (dev->type == BLOCK_PARTITION){
+            partition_t *part = (void*)dev;
+            if (part->uuid && !strncmp((const char *)part->uuid,(const char *)rootuuid,37)){
+                target = part;
+                break;
+            }
+        }
+    }
+    if (!target){
+        color_printf("[ PANIC ] root uuid(%s) not found!!!\n",VIEW_COLOR_RED,VIEW_COLOR_WHITE,rootuuid);
+    }else{
+        if (vfs_mount(target,"/root",0)){
+            color_printf("[ PANIC ] mount root uuid(%s) failed!!!\n",VIEW_COLOR_RED,VIEW_COLOR_WHITE,rootuuid);
+        }else{
+            wb_printf("[  VFS  ] root mount successfully (uuid %s)\n",rootuuid);
+        }
+    }
 }
