@@ -70,9 +70,14 @@ typedef struct task_start {
     uint64_t rbx,rbp,r12,r13,r14,r15,ret;
 } task_start_t;
 
+extern pcb_t *pcb_of_init;
+
 pcb_t *get_current(void);
 void put_to_ready_list_first(pcb_t *task);
-pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n);
+
+void kernel_thread_default(char *name, void *addr);
+void kernel_thread_link_init(char *name, void *addr);
+
 void schedule(void);
 void __schedule_locked(uint8_t intr);
 void __schedule_other_locked(spinlock_t *wq_lock);
@@ -85,7 +90,5 @@ static inline void preempt_enable(void) {
     pcb_t *current = get_current();
     current->preempt_count--;
 }
-
-extern pcb_t *pcb_of_init;
 
 #endif

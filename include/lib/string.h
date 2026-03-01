@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 void memcpy(void* dest, void* source, uint32_t length);
+void *memmove(void *dest, void *src, uint32_t n);
 uint8_t memcmp(void* a, void* b, uint32_t length);
 uint32_t strlen(const char* str);
 uint32_t strcpy(char* dest, char* source);

@@ -25,6 +25,7 @@ static uint32_t alloc_pid_and_add_to_all_list(pcb_t *new_task);
 static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n);
 static void free_task(pcb_t *task);
 static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent);
+static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n);
 
 void init_task(void)
 {
@@ -45,7 +46,7 @@ void init_task(void)
     pcb_of_init = kernel_thread("init",init,NULL,-1);
 }
 
-pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n){
+static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n){
     uint32_t target;
     if (n == (uint32_t)-1){
         target = get_logic_cpu_id();
@@ -346,18 +347,6 @@ void yield(void){
     __schedule_locked(intr);
 }
 
-void ahci_kernel_thread(void);
-
-void put_ahci_thread(void){
-    kernel_thread("ahci",ahci_kernel_thread,pcb_of_init,0);
-}
-
-void tty_task(void *arg);
-
-void put_tty_thread(void){
-    kernel_thread("tty0",tty_task,pcb_of_init,0);
-}
-
 int init_cwd_for_started_tasks(struct dentry *root){
     list_head_t *pos;
     int ret = 0;
@@ -369,4 +358,12 @@ int init_cwd_for_started_tasks(struct dentry *root){
     }
     spin_unlock(&task_manager.all_list.lock);
     return ret;
+}
+
+void kernel_thread_default(char *name, void *addr){
+    kernel_thread(name,addr,get_current(),0);
+}
+
+void kernel_thread_link_init(char *name, void *addr){
+    kernel_thread(name,addr,pcb_of_init,0);
 }

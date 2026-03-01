@@ -36,7 +36,7 @@ char rootuuid[37] = "?";
 void init_fs_mem(void){
     init_block();
     init_vfs_mgr();
-    kernel_thread("fs_cache",dentry_cache_task,pcb_of_init,0);
+    kernel_thread_link_init("fs_cache",dentry_cache_task);
 }
 
 static inline void init_vfs_mgr(void){
@@ -1039,6 +1039,7 @@ int devfs_block_register(const char *name,int mode, struct file_operations *fops
     atomic_set(&new_node->link_count,1);
     new_node->sb = devfs_sb;
     new_node->size = 0;
+    new_node->private_data = NULL;
 
     dentry_t *new_dentry = dentry_create(name,new_node);
     if (!new_dentry){
@@ -1051,6 +1052,60 @@ int devfs_block_register(const char *name,int mode, struct file_operations *fops
 
     bdev->fs_dentry = new_dentry;
     
+    ret = 0;
+out:
+    if (!locked){
+        write_unlock(&vfs_mgr.namespace_lock);
+        write_unlock(&vfs_mgr.mount_lock);
+    }
+    return ret;
+}
+
+int devfs_chr_register(const char *name, int mode, struct file_operations *fops, void *private_data, uint64_t flags, bool locked)
+{
+    int ret = -1;
+    if (!devfs_sb) {
+        return -1;
+    }
+    if (!locked){
+        write_lock(&vfs_mgr.mount_lock);
+        write_lock(&vfs_mgr.namespace_lock);
+    }
+
+    dentry_t *find = __vfs_lookup_locked(devfs_sb->root, name);
+    if (find){
+        dentry_put(find);
+        goto out;
+    }
+
+    inode_t *new_node = kmalloc(sizeof(inode_t));
+    if (!new_node){
+        goto out;
+    }
+
+    new_node->default_file_ops = fops;
+    new_node->deleting = false;
+    mutex_init(&new_node->i_data_lock);
+    rwlock_init(&new_node->i_meta_lock);
+    new_node->ino = 0;
+    new_node->inode_ops = &devfs_root_iops;  // 使用现有的 devfs 根 inode 操作
+    INIT_LIST_HEAD(&new_node->lru_node);
+    new_node->mode = mode;
+    new_node->private_data = private_data;   // 存储设备索引或设备号
+    atomic_set(&new_node->refcount, 1);
+    atomic_set(&new_node->link_count, 1);
+    new_node->sb = devfs_sb;
+    new_node->size = 0;
+
+    dentry_t *new_dentry = dentry_create(name, new_node);
+    if (!new_dentry){
+        kfree(new_node);
+        goto out;
+    }
+    new_dentry->in_mnt = devfs_sb;
+    new_dentry->flags |= flags;
+    dentry_set_parent(devfs_sb->root, new_dentry);
+
     ret = 0;
 out:
     if (!locked){

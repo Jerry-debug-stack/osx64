@@ -216,28 +216,26 @@ void init_keyboard(void)
     enable_irq(1);
 }
 
+/// @brief 处理扫描码,只在键盘中断上下文中启用
+/// @param scancode 
 static void handle_scancode(uint8_t scancode)
 {
-    uint8_t intr = spin_lock_irq_save(&kbd_status->lock);
+    spin_lock(&kbd_status->lock);
 
-    if (scancode == 0xE0)
-    {
+    // 处理 0xE0 前缀
+    if (scancode == 0xE0) {
         kbd_status->e0_prefix = 1;
         spin_unlock(&kbd_status->lock);
-        io_set_intr(intr);
         return;
     }
 
-    uint8_t make = !(scancode & 0x80); // 通码为1，断码为0
-    uint8_t code = scancode & 0x7F;    // 去掉断码标志
+    uint8_t make = !(scancode & 0x80);
+    uint8_t code = scancode & 0x7F;
 
-    // 更新修饰键状态（简化版，仅处理常用键）
-    if (!kbd_status->e0_prefix)
-    {
-        switch (code)
-        {
-        case 0x2A:
-        case 0x36: // 左/右 Shift
+    // 更新修饰键状态（不分左右）
+    if (!kbd_status->e0_prefix) {
+        switch (code) {
+        case 0x2A: case 0x36: // 左/右 Shift
             kbd_status->shift = make;
             break;
         case 0x1D: // 左 Ctrl
@@ -246,77 +244,131 @@ static void handle_scancode(uint8_t scancode)
         case 0x38: // 左 Alt
             kbd_status->alt = make;
             break;
-        case 0x3A:    // CapsLock
-            if (make) // 仅在按下时切换
-                kbd_status->caps_lock = !kbd_status->caps_lock;
+        case 0x3A: // CapsLock
+            if (make) kbd_status->caps_lock = !kbd_status->caps_lock;
             break;
-            // 可继续添加 NumLock、ScrollLock 等
         }
-    }
-    else
-    {
-        // 处理带 0xE0 前缀的键（如右 Ctrl、右 Alt、方向键）
-        switch (code)
-        {
+    } else {
+        switch (code) {
         case 0x1D: // 右 Ctrl
             kbd_status->ctrl = make;
             break;
         case 0x38: // 右 Alt
             kbd_status->alt = make;
             break;
-            // 方向键等可暂不处理，或映射为转义序列
         }
-        kbd_status->e0_prefix = 0; // 清除前缀标志
     }
 
-    // 如果是通码，尝试转换为 ASCII 并放入缓冲区
-    if (make)
-    {
-        char ascii = 0;
-        if (code < sizeof(scancode_to_ascii))
-        {
-            if (kbd_status->shift)
-                ascii = scancode_to_ascii_shift[code];
-            else
-                ascii = scancode_to_ascii[code];
+    // 如果是通码，生成键码
+    if (make) {
+        keycode_t key = 0;
 
-            // CapsLock 处理（仅对字母生效）
-            if (kbd_status->caps_lock)
-            {
-                if (ascii >= 'a' && ascii <= 'z')
-                    ascii -= 'a' - 'A';
-                else if (ascii >= 'A' && ascii <= 'Z')
-                    ascii += 'a' - 'A';
+        if (!kbd_status->e0_prefix) {
+            // 无前缀的普通键
+            if (code < sizeof(scancode_to_ascii)) {
+                char base_no_shift = scancode_to_ascii[code];
+                char base_shift = scancode_to_ascii_shift[code];
+                char result_char = 0;
+
+                // 检查是否有 Ctrl 或 Alt 按下
+                int meta_pressed = (kbd_status->ctrl || kbd_status->alt);
+
+                if (meta_pressed) {
+                    // 当 Ctrl 或 Alt 按下时
+                    if (base_no_shift >= 'a' && base_no_shift <= 'z') {
+                        // 字母：强制大写
+                        result_char = base_no_shift - 'a' + 'A';
+                    } else if (base_no_shift >= 'A' && base_no_shift <= 'Z') {
+                        result_char = base_no_shift; // 已经是大写
+                    } else {
+                        // 非字母：使用无 Shift 的基础字符
+                        result_char = base_no_shift;
+                    }
+                } else {
+                    // 无 Ctrl/Alt 时，原有逻辑
+                    result_char = kbd_status->shift ? base_shift : base_no_shift;
+
+                    // CapsLock 处理（仅对字母）
+                    if (kbd_status->caps_lock) {
+                        if (result_char >= 'a' && result_char <= 'z')
+                            result_char -= 'a' - 'A';
+                        else if (result_char >= 'A' && result_char <= 'Z')
+                            result_char += 'a' - 'A';
+                    }
+                }
+
+                
+                if (result_char) {
+                    key = (keycode_t)result_char;
+                    // 修饰标志：Ctrl 和 Alt 总是添加（如果按下）
+                    if (kbd_status->ctrl)  key |= MOD_CTRL;
+                    if (kbd_status->alt)   key |= MOD_ALT;
+                    // Shift 仅在 Ctrl 或 Alt 按下时才添加，否则不添加（因为字符已体现）
+                    if ((kbd_status->ctrl || kbd_status->alt) && kbd_status->shift) {
+                        key |= MOD_SHIFT;
+                    }
+                } else {
+                    // 功能键（映射表中为0的键）
+                    switch (code) {
+                    case 0x3B: key = KEY_F1; break;
+                    case 0x3C: key = KEY_F2; break;
+                    case 0x3D: key = KEY_F3; break;
+                    case 0x3E: key = KEY_F4; break;
+                    case 0x3F: key = KEY_F5; break;
+                    case 0x40: key = KEY_F6; break;
+                    case 0x41: key = KEY_F7; break;
+                    case 0x42: key = KEY_F8; break;
+                    case 0x43: key = KEY_F9; break;
+                    case 0x44: key = KEY_F10; break;
+                    case 0x57: key = KEY_F11; break;
+                    case 0x58: key = KEY_F12; break;
+                    default: break;
+                    }
+                }
             }
-
-            // Ctrl 组合：将字母转为控制字符（例如 Ctrl+A -> 1）
-            if (kbd_status->ctrl)
-            {
-                if (ascii >= 'a' && ascii <= 'z')
-                    ascii = ascii - 'a' + 1;
-                else if (ascii >= 'A' && ascii <= 'Z')
-                    ascii = ascii - 'A' + 1;
-                // 其他键的 Ctrl 组合可后续扩展
+        } else {
+            // 带 0xE0 前缀的键（方向键、编辑键）
+            switch (code) {
+            case 0x48: key = KEY_UP; break;
+            case 0x50: key = KEY_DOWN; break;
+            case 0x4B: key = KEY_LEFT; break;
+            case 0x4D: key = KEY_RIGHT; break;
+            case 0x47: key = KEY_HOME; break;
+            case 0x4F: key = KEY_END; break;
+            case 0x49: key = KEY_PGUP; break;
+            case 0x51: key = KEY_PGDN; break;
+            case 0x52: key = KEY_INSERT; break;
+            case 0x53: key = KEY_DELETE; break;
+            default: break;
             }
         }
 
-        if (ascii)
-        {
-            uint32_t next_head = (kbd_status->head + 1) % KEYBOARD_BUFFER_SIZE;
-            if (next_head != kbd_status->tail)
-            { // 缓冲区未满
-                kbd_status->buffer[kbd_status->head] = ascii;
-                kbd_status->head = next_head;
+        // 如果生成了键码，则放入缓冲区
+        if (key) {
+            // 对于特殊键，我们需要添加修饰标志
+            if ((key & 0xFF) >= 0x80) {
+                if (kbd_status->shift) key |= MOD_SHIFT;
+                if (kbd_status->ctrl)  key |= MOD_CTRL;
+                if (kbd_status->alt)   key |= MOD_ALT;
             }
-            // 若满则丢弃字符
+
+            uint32_t next = (kbd_status->head + 1) % KEYBOARD_BUFFER_SIZE;
+            if (next != kbd_status->tail) {
+                kbd_status->buffer[kbd_status->head] = key;
+                kbd_status->head = next;
+            }
         }
+    }
+
+    // 清除 0xE0 前缀标志
+    if (scancode != 0xE0) {
+        kbd_status->e0_prefix = 0;
     }
 
     spin_unlock(&kbd_status->lock);
-    io_set_intr(intr);
 }
 
-size_t keyboard_read(char *buf, size_t length) {
+size_t keyboard_read(keycode_t *buf, size_t length) {
     size_t count = 0;
 
     uint8_t intr = io_cli();
@@ -335,18 +387,63 @@ size_t keyboard_read(char *buf, size_t length) {
 #include "view/view.h"
 #include "task.h"
 
-void tty_task(void *arg)
+#include "fs/fs.h"
+extern bool tty_ready;
+
+void test_task(void){
+    int slave_fd = sys_open("/dev/pty_s0", O_RDWR, 0);
+    char buf[512];
+    while (1) {
+        int len = sys_read(slave_fd,buf,510);
+        if (len){
+            buf[len] = '\n';
+            sys_write(slave_fd,buf,len + 1);
+        }
+    }
+}
+
+void display_server(UNUSED void *arg)
 {
-    (void)arg;          // 未使用参数
-    char *buf = kmalloc(KEYBOARD_BUFFER_SIZE);
+    // 打开 pty master 设备，假设使用第一个 pty
+    int master_fd = sys_open("/dev/pty_m0", O_RDWR, 0);
+    if (master_fd < 0) {
+        wb_printf("display_server: failed to open pty master\n");
+        return;
+    }
+
+    keycode_t *buf = kmalloc(KEYBOARD_BUFFER_SIZE * sizeof(keycode_t));
+    char *char_buf = kmalloc(KEYBOARD_BUFFER_SIZE);
+
+    tty_ready = true;
+
+    kernel_thread_default("test",test_task);
 
     while (1) {
         int length = keyboard_read(buf,KEYBOARD_BUFFER_SIZE - 1);
-        if (length) {
-            buf[length] = '\0';
-            wb_printf(buf);
-        } else {
-            yield();
+        if (length > 0){
+            int j = 0;
+            for (int i = 0; i < length; i++)
+            {
+                if (!(buf[i] >> 8)){
+                    char_buf[j] = (char)buf[i];
+                    j++;
+                }
+            }
+            if (j > 0)
+                sys_write(master_fd,char_buf,j);
         }
+        length = sys_read(master_fd,char_buf,KEYBOARD_BUFFER_SIZE - 1);
+        if (length){
+            char_buf[length] = '\0';
+            char *last = char_buf;
+            for (int i = 0; i < length + 1; i++)
+            {
+                if (char_buf[i] == '\0'){
+                    color_print(last,VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+                    last = char_buf + i + 1;
+                }
+            }
+        }
+        yield();
     }
 }

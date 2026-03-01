@@ -9,6 +9,19 @@ void memcpy(void* dest, void* source, uint32_t length)
         d[i] = s[i];
 }
 
+void *memmove(void *dest, void *src, uint32_t n) {
+    unsigned char *d = dest;
+    unsigned char *s = src;
+    if (d < s) {
+        for (uint32_t i = 0; i < n; i++)
+            d[i] = s[i];
+    } else if (d > s) {
+        for (uint32_t i = n; i > 0; i--)
+            d[i-1] = s[i-1];
+    }
+    return dest;
+}
+
 uint8_t memcmp(void* a, void* b, uint32_t length)
 {
     uint8_t* p = a;

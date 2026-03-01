@@ -19,12 +19,12 @@ void init_acpi_madt(void);
 void init_task(void);
 void init_fs_mem(void);
 void enumerate_pcie_devices(void);
-void put_ahci_thread(void);
 void read_partitions(void);
 
 _Noreturn void cpu_task_start(void);
 
 bool multi_core_start = false;
+bool tty_ready = false;
 
 void enable_irq(uint64_t irq);
 _Noreturn void ap_start(void){
@@ -54,8 +54,11 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
     cpu_task_start();
 }
 
+void ahci_kernel_thread(void);
+void display_server(UNUSED void *arg);
 
-void mount_root();
+void mount_root(void);
+void pty_init(void);
 void put_tty_thread(void);
 
 void init(void){
@@ -63,11 +66,12 @@ void init(void){
     
     init_fs_mem();
     enumerate_pcie_devices();
-    put_ahci_thread();
+    kernel_thread_link_init("ahci",ahci_kernel_thread);
     read_partitions();
     mount_root();
-
-    put_tty_thread();
+    pty_init();
+    
+    kernel_thread_link_init("display",display_server);
 
     while (1)
     {

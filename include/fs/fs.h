@@ -84,6 +84,7 @@ typedef struct file {
     struct inode   *inode;
     struct dentry  *dentry;
     struct file_operations *file_ops;
+    void            *private_data;
     uint64_t        pos;
     atomic_t        refcount;
     int             flags;

@@ -116,5 +116,8 @@ static int devfs_setattr(UNUSED struct inode *inode, UNUSED struct iattr *attr)
 
 static int devfs_delete(UNUSED struct inode *inode)
 {
-    return -1;
+    //if (inode->private_data){
+    //    kfree(inode->private_data);
+    //}
+    return 0;
 }

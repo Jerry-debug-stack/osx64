@@ -1,6 +1,10 @@
 #include "mm/mm.h"
 #include "view/view.h"
 #include <stdarg.h>
+#include <stdbool.h>
+#include "fs/fs.h"
+
+extern bool tty_ready;
 
 static uint32_t vsnprintf(char* buf, uint32_t size, const char* fmt, va_list args);
 
@@ -11,7 +15,11 @@ uint32_t color_printf(const char* fmt, uint32_t color_back, uint32_t color_fore,
     va_start(args, color_fore);
     uint32_t written = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    color_print(buf, color_back, color_fore);
+    if (tty_ready){
+        sys_write(0,buf,written);
+    }else{
+        color_print(buf, color_back, color_fore);
+    }
     return written;
 }
 
