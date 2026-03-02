@@ -1,11 +1,12 @@
 # tools are here.
 nasm 			= nasm
 ld   			= ld
-gcc  			= gcc -o2 -o
+gcc  			= gcc -o
 objcopy			= objcopy
 
 inc				= include
 gccBuild 		= -m64 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mcmodel=large -mno-red-zone -Wall -Wextra -I$(inc) -c -g
+gccBuild 		+= -mgeneral-regs-only -mno-mmx -mno-sse -mno-sse2 -mno-80387
 
 c_srcs			= $(shell find src -name "*.c")
 

@@ -5,6 +5,9 @@
 #define VIRTUAL_ADDR_0 0xffff800000000000
 #define PHYSIC_ADDR_AP_CODE_DATA       0x10000
 
+#define VIRTUAL_ADDR_USER_HIGHEST 0x800000000000
+#define VIRTUAL_ADDR_USER_ELF_HIGHEST 0x700000000000
+
 #define easy_phy2linear(addr) (void*)((uint64_t)(addr) + VIRTUAL_ADDR_0)
 #define easy_linear2phy(addr) (void*)((uint64_t)(addr) - VIRTUAL_ADDR_0)
 uint64_t mem_linear2phy(uint64_t addr,uint64_t cr3);
@@ -22,6 +25,8 @@ int put_user(char num,char *buf);
 
 #define SELECTOR_KERNEL_CS (0x1 << 3)
 #define SELECTOR_KERNEL_DS (0x2 << 3)
+#define SELECTOR_APPLICATION_CS ((0x03 << 3) | 0x3)
+#define SELECTOR_APPLICATION_DS ((0x04 << 3) | 0x3)
 
 #define SYSCALL_INTERRUPT_VECTOR 0x80
 #define MAX_SYSCALL_NUM          128

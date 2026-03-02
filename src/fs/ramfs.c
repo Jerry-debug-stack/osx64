@@ -123,6 +123,7 @@ static int ramfs_lookup(inode_t *dir, dentry_t *dentry) {
             inode->private_data = child_node;
             inode->size = child_node->file_size;
             dentry->inode = inode;
+            dentry->in_mnt = dir->sb; 
             atomic_inc(&inode->refcount);
             return 0;
         }

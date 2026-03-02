@@ -8,7 +8,7 @@ PAGE_ITEM       equ PAGE_ITEM_SMALL|PAGE_BIG_ENTRY
 %include "pm.inc"
 
 global _start
-global ptable4
+global ptable4:data
 global load_protect
 global Debug,Nmi,Int3,Overflow,Bounds,UndefinedOpcode,DevNotAvailable,DoubleFault,CoprocessorSegmentOverRun
 global DoubleFault,CoprocessorSegmentOverRun,InvalidTSS,SegmentNotPresent,GeneralProtection,PageFault,x87FPUError
@@ -16,7 +16,7 @@ global AlignmentCheck,MachineCheck,SIMDException,VirtualizationException,StackSe
 global intr0,intr1,intr2,intr3,intr4,intr5,intr6,intr7,intr8,intr9,intr10,intr11,intr12,intr13,intr14,intr15,intr16,intr17,intr18,intr19,intr20,intr21,intr22,intr23
 global intr2_bsp
 global syscall_enter
-global task_switch_unlock,task_switch_double_unlock,asm_task_start,asm_task_start_go_out
+global task_switch_unlock,task_switch_double_unlock,asm_task_start,asm_task_start_go_out,asm_execv_out
 
 extern cstart,exception_handler
 extern intr_handler,timer_intr_soft_bsp
@@ -508,13 +508,25 @@ section .text64high
         pop r15
         ret
 
+    asm_execv_out:
+        mov rsp,rdi
+        mov qword [rsp + 0],   ((0x04 << 3) | 0x3)       ; ds
+        mov qword [rsp + 8],   ((0x04 << 3) | 0x3)       ; es
+        mov qword [rsp + 88],  rcx                       ; rdi (new_argv)
+        mov qword [rsp + 136], rdx                       ; rip
+        mov qword [rsp + 144], ((0x03 << 3) | 0x3)       ; cs
+        mov qword [rsp + 152], 0x3202                    ; rflags
+        mov qword [rsp + 160], rsi                       ; rsp
+        mov qword [rsp + 168], ((0x04 << 3) | 0x3)       ; ss
+        go_out
+
     syscall_enter:
         save
         cmp rax,128
         jae .bad
-        shl rax,3
-        add rax,syscall_table
-        mov rax,qword[rax]
+        shl rax, 3
+        mov rbx, syscall_table          ; 64位绝对地址加载
+        mov rax, [rbx + rax]
         call rax
     .out:
         cli

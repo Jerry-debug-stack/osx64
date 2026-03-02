@@ -126,20 +126,13 @@ static void print_char(uint8_t ch, uint32_t color_back, uint32_t color_fore)
     }
 }
 
-#include <stdbool.h>
-extern bool multi_core_start;
-
 void color_print(char* str, uint32_t color_back, uint32_t color_fore)
 {
-    if (multi_core_start){
-        spin_lock(&vMm.view_lock);
-    }
+    spin_lock(&vMm.view_lock);
     uint32_t i = 0;
     while (str[i] != 0) {
         print_char((uint8_t)str[i], color_back, color_fore);
         i++;
     }
-    if (multi_core_start){
-        spin_unlock(&vMm.view_lock);
-    }
+    spin_unlock(&vMm.view_lock);
 }

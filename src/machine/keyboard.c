@@ -392,13 +392,15 @@ extern bool tty_ready;
 
 void test_task(void){
     int slave_fd = sys_open("/dev/pty_s0", O_RDWR, 0);
-    char buf[512];
-    while (1) {
-        int len = sys_read(slave_fd,buf,510);
-        if (len){
-            buf[len] = '\n';
-            sys_write(slave_fd,buf,len + 1);
-        }
+    sys_dup2(slave_fd,0);
+    sys_dup2(slave_fd,1);
+    sys_dup2(slave_fd,2);
+    char *argv[] = {(void *)0, (void *)0};
+    sys_execv_end("/root/test.elf",argv);
+    wb_printf("execv failed!");
+    while (1)
+    {
+        yield();
     }
 }
 

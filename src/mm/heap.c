@@ -4,6 +4,7 @@
 #include "mm/slab.h"
 
 extern MM_MANAGER mm;
+extern uint64_t *vir_ptable4;
 
 void init_heap()
 {
@@ -60,7 +61,7 @@ uint64_t heap_alloc(uint32_t size)
             if (ret + aligned_size > mm.he) {
                 for (uint64_t addr = mm.he; addr < ret + aligned_size; addr += 4096) {
                     uint64_t phy_addr = alloc_page_4k();
-                    put_page_4k(phy_addr, addr, (uint64_t)easy_phy2linear(ptable4), 0);
+                    put_page_4k(phy_addr, addr, (uint64_t)vir_ptable4, 0);
                 }
                 mm.he = ret + aligned_size;
             }

@@ -41,6 +41,7 @@ void init_task(void)
         item->total_ready_num = 0;
         pcb_t *pcb_of_idle = put_kernel_thread("idle",idle,NULL);
         item->idle = pcb_of_idle;
+        item->now_running = NULL;
     }
     /* 初始化init进程 */
     pcb_of_init = kernel_thread("init",init,NULL,-1);
@@ -60,7 +61,7 @@ static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n){
     return ret;
 }
 
-extern uint64_t ptable4[512];
+extern uint64_t *vir_ptable4;
 
 /**
  * @brief
@@ -84,7 +85,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     INIT_LIST_HEAD(&new_task->wait_list_item);
     wait_queue_init(&new_task->wait_queue);
     spin_list_init(&new_task->timers);
-    new_task->cr3 = (uint64_t)ptable4;
+    new_task->cr3 = (uint64_t)vir_ptable4;
     new_task->cpuid = 0;
     new_task->preempt_count = 0;
     /* pid */
@@ -166,7 +167,7 @@ static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n){
 static inline void switch_cr3_if_needed(pcb_t *will_run)
 {
     uint64_t current_cr3;
-    uint64_t new_cr3 = will_run->cr3;
+    uint64_t new_cr3 = (uint64_t)easy_linear2phy(will_run->cr3);
     __asm__ __volatile__ (
         "mov %%cr3, %0"
         : "=r"(current_cr3)
@@ -366,4 +367,83 @@ void kernel_thread_default(char *name, void *addr){
 
 void kernel_thread_link_init(char *name, void *addr){
     kernel_thread(name,addr,pcb_of_init,0);
+}
+
+#include "lib/elf.h"
+_Noreturn void asm_execv_out(uint64_t a,uint64_t b,uint64_t c,uint64_t d);
+
+int sys_execv_end(const char* path, char* const argv[])
+{
+    if (!path)
+        return -1;
+    int i = 0;
+    int len = 0;
+    while (argv[i] != 0) {
+        len += strlen(argv[i]) + 1;
+        i++;
+    }
+    if (i > 31 || (len + (i << 3) >= 3072)){
+        return -5;
+    }
+    pcb_t *current = get_current();
+    int fd = sys_open(path,O_RDONLY,0);
+    if (fd < 0){
+        return -4;
+    }
+    elf64_header_t* header = elf_file_executable(fd);
+    if (!header) {
+        sys_close(fd);
+        return -3;
+    }
+
+    char* temp = kmalloc(4096);
+    char* pos = temp + 4096;
+    char** new_argv = (char**)(pos - len - i - 8);
+    i = 0;
+    while (argv[i] != 0) {
+        len = strlen(argv[i]) + 1;
+        pos -= len;
+        memcpy(pos, argv[i], len);
+        new_argv[i] = (char*)(((uint64_t)pos) - ((uint64_t)temp)
+            + (VIRTUAL_ADDR_USER_HIGHEST - 4096));
+        i++;
+    }
+    new_argv[i] = (void*)0;
+
+    uint8_t intr = io_cli();
+    if (current->cr3 != (uint64_t)vir_ptable4){
+        uint64_t old_cr3 = current->cr3;
+        current->cr3 = (uint64_t)vir_ptable4;
+        io_set_intr(intr);
+        free_ptable_and_mem(old_cr3);
+    }else{
+        io_set_intr(intr);
+    }
+    uint64_t cr3 = (uint64_t)kmalloc(4096);
+    memset((void*)cr3, 0, 2048);
+    memcpy((void*)(cr3 + 2048), (void*)((uint64_t)vir_ptable4 + 2048), 2048);
+    uint64_t phy_cr3 = (uint64_t)easy_linear2phy(cr3);
+    
+    intr = io_cli();
+    current->cr3 = cr3;
+    __asm__ __volatile__("mov %0, %%cr3" : : "r"(phy_cr3) : "memory");
+    put_page_4k((uint64_t)easy_linear2phy(temp),VIRTUAL_ADDR_USER_HIGHEST - 4096,cr3,1);
+    io_set_intr(intr);
+
+    elf_file_copy(fd, header, cr3);
+    sys_close(fd);
+
+    /* 清理除了std以外的所有文件 */
+    for (uint32_t i = 3; i < NR_OPEN_DEFAULT; i++){
+        sys_close(i);
+    }
+    __asm__ __volatile__("cli");
+    current->is_ker = false;
+    
+    asm_execv_out(
+        (uint64_t)current + DEFAULT_PCB_SIZE - sizeof(registers_t),
+        ((uint64_t)new_argv) - (uint64_t)temp + (VIRTUAL_ADDR_USER_HIGHEST - 4096) - 8,
+        header->elf_entry,
+        (uint64_t)new_argv
+    );
 }

@@ -391,6 +391,7 @@ static int ext2_lookup(struct inode *dir, struct dentry *dentry)
                     return -1;
                 }
                 dentry->inode = child_inode;
+                dentry->in_mnt = dir->sb;
                 kfree(buf);
                 return 0;
             }

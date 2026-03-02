@@ -91,4 +91,6 @@ static inline void preempt_enable(void) {
     current->preempt_count--;
 }
 
+int sys_execv_end(const char* path, char* const argv[]);
+
 #endif

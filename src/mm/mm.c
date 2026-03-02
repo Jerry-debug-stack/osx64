@@ -4,7 +4,7 @@
 #include "multiboot.h"
 
 /// @brief memory reference table：定义在加载部分的尾部
-uint8_t mrt[1] __attribute__((section(".mrt")));
+extern uint8_t _mrt_start[];
 
 PHYSIC_AREA_ITEM pais[DEFAULT_PAI_NUMBER];
 
@@ -20,8 +20,15 @@ static void set_kernel_area(void);
 extern void init_slab(void);
 extern void init_heap();
 
+extern uint32_t ptable4[];
+uint64_t *vir_ptable4;
+
 void init_mm(MULTIBOOT_INFO* info)
 {
+    uint64_t a;
+    __asm__("movq $ptable4, %0" : "=r"(a));
+    vir_ptable4 = easy_phy2linear(a);
+
     get_total_memory(info);
     set_mrt_table();
     set_kernel_area();
@@ -57,8 +64,8 @@ static void get_total_memory(MULTIBOOT_INFO* info)
 
 static void set_mrt_table(void)
 {
-    uint64_t addr = ((uint64_t)easy_linear2phy(mrt) + mm.tpp + 0xfff) & 0xfffffffffffff000;
-    memset(mrt, (uint8_t)0xff, (addr >> 12));
+    uint64_t addr = ((uint64_t)easy_linear2phy(_mrt_start) + mm.tpp + 0xfff) & 0xfffffffffffff000;
+    memset(_mrt_start, (uint8_t)0xff, (addr >> 12));
     uint64_t last_addr = addr;
     for (uint32_t i = 0; i < mm.npai; i++) {
         if (pais[i].epa <= addr) {
@@ -67,10 +74,10 @@ static void set_mrt_table(void)
             pais[i].spa = pais[i].nfpa = addr;
             pais[i].fpp = (pais[i].epa - addr) >> 12;
             last_addr = pais[i].epa;
-            memset(&mrt[addr >> 12], 0, pais[i].fpp);
+            memset(&_mrt_start[addr >> 12], 0, pais[i].fpp);
         } else {
-            memset(&mrt[last_addr >> 12], 0xff, (pais[i].spa - last_addr) >> 12);
-            memset(&mrt[pais[i].spa >> 12], 0, pais[i].fpp);
+            memset(&_mrt_start[last_addr >> 12], 0xff, (pais[i].spa - last_addr) >> 12);
+            memset(&_mrt_start[pais[i].spa >> 12], 0, pais[i].fpp);
             last_addr = pais[i].epa;
         }
         mm.tfpp += pais[i].fpp;
@@ -82,12 +89,12 @@ static void set_kernel_area(void)
     uint64_t max = (mm.hpa + 0x1fffff) >> TABLE_LEVEL_3_BITS;
     for (uint64_t i = 0; i < max; i++) {
         uint64_t addr = i << TABLE_LEVEL_3_BITS;
-        put_page_2M(addr, (uint64_t)easy_phy2linear(addr), (uint64_t)ptable4);
+        put_page_2M(addr, (uint64_t)easy_phy2linear(addr), (uint64_t)vir_ptable4);
     }
     for (uint32_t i = SLAB_START_ID_IN_PML4; i < SLAB_START_ID_IN_PML4 + NUMBER_OF_OTHER_IN_PML4; i++) {
         uint64_t phy = alloc_page_4k();
         memset((void*)easy_phy2linear(phy), 0, 4096);
-        ptable4[i] = phy | PAGE_KERNEL_DIR;
+        vir_ptable4[i] = phy | PAGE_KERNEL_DIR;
     }
     flush_tlb();
 }
@@ -97,11 +104,11 @@ uint64_t alloc_page_4k(void)
     for (uint32_t i = 0; i < mm.npai; i++) {
         if (pais[i].fpp) {
             uint64_t ret = pais[i].nfpa;
-            mrt[ret >> 12]++;
+            _mrt_start[ret >> 12]++;
             pais[i].fpp--;
             if (pais[i].fpp) {
                 for (uint64_t j = ret >> 12; j < pais[i].epa >> 12; j++) {
-                    if (!mrt[j]) {
+                    if (!_mrt_start[j]) {
                         pais[i].nfpa = j << 12;
                         return ret;
                     }
@@ -124,16 +131,16 @@ uint64_t alloc_n_pages_4k(uint32_t n)
             uint64_t ret;
             uint32_t m = 0;
             for (uint64_t j = pais[i].nfpa >> 12; j < pais[i].epa >> 12; j++) {
-                if (!mrt[j]) {
+                if (!_mrt_start[j]) {
                     if (!m)
                         ret = j;
                     if (++m == n) {
                         for (uint32_t k = 0; k < n; k++)
-                            mrt[ret + k] = 1;
+                            _mrt_start[ret + k] = 1;
                         pais[i].fpp -= n;
                         if (pais[i].fpp) {
                             for (uint64_t k = pais[i].nfpa >> 12; k < pais[i].epa >> 12; k++) {
-                                if (!mrt[k]) {
+                                if (!_mrt_start[k]) {
                                     pais[i].nfpa = k << 12;
                                     return ret << 12;
                                 }
@@ -166,9 +173,9 @@ uint8_t decrease_reference_page_4k(uint64_t addr)
     if (addr >= mm.hpa)
         halt();
     uint64_t index = addr >> 12;
-    if (mrt[index] == 0xff || !mrt[index])
+    if (_mrt_start[index] == 0xff || !_mrt_start[index])
         halt();
-    if (--mrt[index] == 0) {
+    if (--_mrt_start[index] == 0) {
         for (uint32_t i = 0; i < mm.npai; i++) {
             if (addr >= pais[i].spa && addr < pais[i].epa) {
                 if (pais[i].fpp)
@@ -181,18 +188,18 @@ uint8_t decrease_reference_page_4k(uint64_t addr)
         }
         halt();
     } else
-        return mrt[index];
+        return _mrt_start[index];
 }
 
 uint8_t add_reference_page_4k(uint64_t addr)
 {
     uint64_t index = addr >> 12;
-    if (mrt[index] == 0xff || !mrt[index]) {
+    if (_mrt_start[index] == 0xff || !_mrt_start[index]) {
         halt();
-    } else if (mrt[index] == 0xfe)
+    } else if (_mrt_start[index] == 0xfe)
         return 1;
     else {
-        mrt[index]++;
+        _mrt_start[index]++;
         return 0;
     }
 }
@@ -242,6 +249,36 @@ void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint
     }
     ptable[layer[3]] = phy_addr | item_type;
     invlpg_tlb(vir_addr);
+}
+
+int exist_page_4k(uint64_t vir_addr, uint64_t ptable_vir) {
+    if (vir_addr & 0xfff) 
+        halt();
+
+    uint64_t* ptable = (uint64_t*)ptable_vir;
+    uint32_t layer[4];
+
+    if (vir_addr >= VIRTUAL_ADDR_0) {
+        layer[0] = ((uint64_t)easy_linear2phy(vir_addr) >> TABLE_LEVEL_1_BITS) + 256;
+    } else {
+        layer[0] = vir_addr >> TABLE_LEVEL_1_BITS;
+    }
+    layer[1] = (vir_addr >> TABLE_LEVEL_2_BITS) & 0x1FF;
+    layer[2] = (vir_addr >> TABLE_LEVEL_3_BITS) & 0x1FF;
+    layer[3] = (vir_addr >> TABLE_LEVEL_4_BITS) & 0x1FF;
+
+    for (int i = 0; i < 4; i++) {
+        if (!(ptable[layer[i]] & PAGE_PRESENT)) {
+            return 0;
+        }
+
+        if (i < 3 && (ptable[layer[i]] & PAGE_BIG_ENTRY)) {
+            return 1;
+        }
+        uint64_t next_phy = ptable[layer[i]] & 0xfffffffffffff000;
+        ptable = (uint64_t*)easy_phy2linear(next_phy);
+    }
+    return 1;
 }
 
 void rm_page_4k(uint64_t vir_addr, uint64_t ptable_vir)
@@ -300,6 +337,41 @@ void put_page_2M(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir)
     }
     ptable[layer[2]] = phy_addr | PAGE_KERNEL_2M;
     invlpg_tlb(vir_addr);
+}
+
+static void free_pagetable_level(uint64_t table_vir, int level) {
+    uint64_t* table = (uint64_t*)table_vir;
+    for (int i = 0; i < 512; i++) {
+        if (table[i] & PAGE_PRESENT) {
+            uint64_t next_phy = table[i] & 0xfffffffffffff000;
+            uint64_t next_vir = (uint64_t)easy_phy2linear(next_phy);
+
+            if (level < 3) {
+                free_pagetable_level(next_vir, level + 1);
+                kfree((void*)next_vir);
+            } else {
+                kfree((void*)next_vir);
+            }
+        }
+    }
+}
+
+void free_ptable_and_mem(uint64_t pml4_vir) {
+    if ((pml4_vir & 0xfff) != 0)
+        halt();
+    if (pml4_vir == (uint64_t)vir_ptable4)
+        return;
+    uint64_t* pml4 = (uint64_t*)pml4_vir;
+    for (int i = 0; i < 256; i++) {
+        if (pml4[i] & PAGE_PRESENT) {
+            uint64_t pdpt_phy = pml4[i] & 0xfffffffffffff000;
+            uint64_t pdpt_vir = (uint64_t)easy_phy2linear(pdpt_phy);
+            free_pagetable_level(pdpt_vir, 1);
+            kfree((void*)pdpt_vir);
+            pml4[i] = 0;
+        }
+    }
+    kfree((void *)pml4_vir);
 }
 
 static inline void flush_tlb(void)

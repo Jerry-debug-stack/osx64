@@ -18,6 +18,7 @@ int find_cmdslot(hba_port_t *port);
 uint64_t ahci_device_uid(ahci_identify_t *data);
 static void ahci_register_block_device(ahci_device_t *adev);
 static ahci_manager_t ahci_mgr;
+extern uint64_t *vir_ptable4;;
 
 static void ahci_register_device(hba_mem_t *hba, int port_no)
 {
@@ -29,7 +30,7 @@ static void ahci_register_device(hba_mem_t *hba, int port_no)
     d->port = &hba->ports[port_no];
     d->port_no = port_no;
     
-    ahci_send(&hba->ports[port_no], 0, 1, &d->identify, COMMAND_IDENTIFY, 0, 0);
+    ahci_send(&hba->ports[port_no], 0, 1, &d->identify, COMMAND_IDENTIFY, 0, (uint64_t)vir_ptable4);
     while (1) {
         if ((hba->ports[port_no].ci & 1) == 0)
             break;
@@ -232,7 +233,7 @@ void stop_cmd(hba_port_t *port)
     }
 }
 
-int ahci_send(hba_port_t *port, uint64_t lba48, uint32_t count, void *buf, char command, int slot, uint64_t pml4_phy)
+int ahci_send(hba_port_t *port, uint64_t lba48, uint32_t count, void *buf, char command, int slot, uint64_t pml4_vir)
 {
     port->is = (uint32_t)-1; // Clear pending interrupt bits
     int spin = 0;            // Spin lock timeout counter
@@ -257,7 +258,7 @@ int ahci_send(hba_port_t *port, uint64_t lba48, uint32_t count, void *buf, char 
     // 4K bytes (8 sectors) per PRDT
     for (i = 0; i < cmdheader->prdtl - 1; i++)
     {
-        tmp_addr = mem_linear2phy(addr, pml4_phy);
+        tmp_addr = mem_linear2phy(addr, pml4_vir);
         cmdtbl->prdt_entry[i].dba = (uint32_t)tmp_addr;
         cmdtbl->prdt_entry[i].dbau = (uint32_t)(tmp_addr >> 32);
         // 8K bytes (this value should always be set to 1 less than the actual value)
@@ -267,7 +268,7 @@ int ahci_send(hba_port_t *port, uint64_t lba48, uint32_t count, void *buf, char 
         tmp_count -= 8;   // 8 sectors
     }
     // Last entry
-    tmp_addr = mem_linear2phy(addr, pml4_phy);
+    tmp_addr = mem_linear2phy(addr, pml4_vir);
     cmdtbl->prdt_entry[i].dba = (uint32_t)tmp_addr;
     cmdtbl->prdt_entry[i].dbau = (uint32_t)(tmp_addr >> 32);
     // 512 bytes per sector

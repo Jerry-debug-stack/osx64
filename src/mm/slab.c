@@ -4,6 +4,7 @@
 #include "lib/io.h"
 
 extern MM_MANAGER mm;
+extern uint64_t *vir_ptable4;
 
 extern uint64_t heap_alloc(uint32_t size);
 extern void heap_free(uint64_t addr);
@@ -26,7 +27,7 @@ void init_slab(void)
         mm.nfslabi[i] = 0;
         uint64_t phy_page = alloc_page_4k();
         SLAB *slab = (void *)(SLAB_START_32 + (i << 39));
-        put_page_4k(phy_page, (uint64_t)slab, (uint64_t)easy_phy2linear(ptable4), 0);
+        put_page_4k(phy_page, (uint64_t)slab, (uint64_t)vir_ptable4, 0);
         memset(slab, 0, 4096);
         slab->bitmap[0] = 1;
         slab->totalfree = slab_info[i].emptynum;
@@ -41,7 +42,7 @@ void init_slab(void)
         for (uint32_t j = 0; j < (uint32_t)64 << i; j++)
         {
             uint64_t phy_addr = alloc_page_4k();
-            put_page_4k(phy_addr, slab_info[i + 5].area_start_addr + (j << 12), (uint64_t)easy_phy2linear(ptable4), 0);
+            put_page_4k(phy_addr, slab_info[i + 5].area_start_addr + (j << 12), (uint64_t)vir_ptable4, 0);
         }
     }
     spin_lock_init(&mm.lock);
@@ -87,7 +88,7 @@ void *slab_alloc(uint32_t size)
                 mm.slabei[i]++;
                 mm.nfslabi[i] = mm.slabei[i];
                 SLAB *newslab = (void *)(slab_info[i].area_start_addr + (mm.slabei[i] << 12));
-                put_page_4k(phy_page, (uint64_t)newslab, (uint64_t)ptable4, 0);
+                put_page_4k(phy_page, (uint64_t)newslab, (uint64_t)vir_ptable4, 0);
                 memset(newslab, 0, 4096);
                 newslab->bitmap[0] = 1;
                 newslab->totalfree = slab_info[i].emptynum;
@@ -143,7 +144,7 @@ void *slab_alloc(uint32_t size)
                 for (uint32_t j = 0; j < info->size >> 4; j++)
                 {
                     uint64_t phy_addr = alloc_page_4k();
-                    put_page_4k(phy_addr, info->area_start_addr + (current->id << (18 + i)) + (j << 12), (uint64_t)easy_phy2linear(ptable4), 0);
+                    put_page_4k(phy_addr, info->area_start_addr + (current->id << (18 + i)) + (j << 12), (uint64_t)vir_ptable4, 0);
                 }
                 return (void*)addr;
             }
@@ -254,8 +255,8 @@ uint64_t mem_linear2phy(uint64_t addr, uint64_t cr3)
     }
     else
     {
-        unsigned long level1, level2, level3, level4;
-        unsigned long *ptable;
+        uint64_t level1, level2, level3, level4;
+        uint64_t *ptable;
         uint64_t offset = addr & 0xFFF;
         if (addr >= VIRTUAL_ADDR_0)
             level1 = ((addr - VIRTUAL_ADDR_0) >> TABLE_LEVEL_1_BITS) + 256; // 高半核偏移
@@ -264,7 +265,7 @@ uint64_t mem_linear2phy(uint64_t addr, uint64_t cr3)
         level2 = (addr >> TABLE_LEVEL_2_BITS) & 0x1FF;
         level3 = (addr >> TABLE_LEVEL_3_BITS) & 0x1FF;
         level4 = (addr >> TABLE_LEVEL_4_BITS) & 0x1FF;
-        ptable = easy_phy2linear(cr3);
+        ptable = (uint64_t *)cr3;
         if ((ptable[level1] & PAGE_PRESENT) == 0)
             return 0;
         ptable = easy_phy2linear(ptable[level1] & 0xFFFFFFFFFFFFFE00);

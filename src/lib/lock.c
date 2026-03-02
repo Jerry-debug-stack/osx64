@@ -4,6 +4,8 @@
 
 /* ====================== 自旋锁实现 ====================== */
 
+extern bool multi_core_start;
+
 /* 自旋锁初始化 */
 void spin_lock_init(spinlock_t *lock)
 {
@@ -13,7 +15,8 @@ void spin_lock_init(spinlock_t *lock)
 /* 获取自旋锁（忙等待） */
 void spin_lock(spinlock_t *lock)
 {
-    preempt_disable();
+    if (multi_core_start)
+        preempt_disable();
     while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
         __asm__ __volatile__("pause");
     }
@@ -27,7 +30,8 @@ void spin_unlock(spinlock_t *lock)
     __sync_synchronize();
     /* 原子释放 */
     __sync_lock_release(&lock->lock);
-    preempt_enable();
+    if (multi_core_start)
+        preempt_enable();
 }
 
 /* 尝试获取自旋锁（非阻塞） */
@@ -38,7 +42,8 @@ int spin_trylock(spinlock_t *lock)
 
 uint8_t spin_lock_irq_save(spinlock_t *lock){
     uint8_t intr = io_cli();
-    preempt_disable();
+    if (multi_core_start)
+        preempt_disable();
     while (atomic_compare_exchange((uint32_t*)&lock->lock,0,1) == 1) {
         __asm__ __volatile__("pause");
     }
@@ -48,11 +53,13 @@ uint8_t spin_lock_irq_save(spinlock_t *lock){
 
 void spin_lock_irq_able(spinlock_t *lock){
     spin_lock(lock);
-    preempt_enable();
+    if (multi_core_start)
+        preempt_enable();
 }
 
 void spin_unlock_irq_able(spinlock_t *lock){
-    preempt_disable();
+    if (multi_core_start)
+        preempt_disable();
     spin_unlock(lock);
 }
 

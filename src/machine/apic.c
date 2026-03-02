@@ -8,7 +8,7 @@
 #include "machine/cpu.h"
 extern GLOBAL_CPU *cpus;
 
-uint32_t* LocalAPIC;
+volatile uint32_t* LocalAPIC;
 IO_APIC IoAPIC;
 
 void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_t ist, uint64_t dpl, uint64_t type);
@@ -152,6 +152,8 @@ extern uint8_t ap_code_data_start[];
 uint32_t ap_startup_lock;
 uint32_t ap_startup_count;
 uint32_t ap_ready_num;
+extern uint64_t *vir_ptable4;
+
 void init_ap(void){
     memcpy(easy_phy2linear(PHYSIC_ADDR_AP_CODE_DATA),ap_code_data_start,512);
     broadcast_ipi_init();
@@ -163,4 +165,7 @@ void init_ap(void){
     broadcast_ipi_startup();
     while(cpus->total_num > ap_ready_num + 1) __asm__ __volatile__("pause");
     color_print("[BspCore] All AP start up finished!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    vir_ptable4[0] = 0;
+    uint64_t tmp;
+    __asm__ __volatile__("movq %%cr3, %0\n\t""movq %0, %%cr3": "=r" (tmp):: "memory");
 }

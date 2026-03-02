@@ -98,6 +98,4 @@ typedef struct MmManager {
 #define PAGE_USER_DIR PAGE_USER_4K
 #define PAGE_USER_4K_COPY_ON_WRITE (PAGE_PRESENT | PAGE_USER_MODE | PAGE_LEVEL_CACHE_ENABLE)
 
-extern uint64_t ptable4[512];
-
 #endif

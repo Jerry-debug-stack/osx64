@@ -46,8 +46,34 @@ SECTIONS
         *(.rodata.*)
         *(.eh_frame)      /* 将.eh_frame放在rodata_k中 */
     }
+    . = ALIGN(4K);
+    .data_k : AT(ADDR(.data_k) - VIRTUAL_ADDR_0) {
+        *(.data)
+        *(.data.rel)
+        *(.data.rel.local) /* 添加数据重定位本地段 */
+        *(.data.rel.*)     /* 添加其他数据重定位段（可选） */
+    }
+    .got : AT(ADDR(.got) - VIRTUAL_ADDR_0){ 
+        *(.got.plt) 
+        *(.got) 
+    }
+    .rela.dyn : AT(ADDR(.rela.dyn) - VIRTUAL_ADDR_0)
+    {
+      *(.rela.init)
+      *(.rela.text .rela.text.*)
+      *(.rela.fini)
+      *(.rela.rodata .rela.rodata.*)
+      *(.rela.data .rela.data.*)
+      *(.rela.tdata .rela.tdata.*)
+      *(.rela.tbss .rela.tbss.*)
+      *(.rela.ctors)
+      *(.rela.dtors)
+      *(.rela.got)
+      *(.rela.bss .rela.bss.*)
+    }
     . = ALIGN(1M);
     .mrt (NOLOAD) : {
+        _mrt_start = .;
         *(.mrt) /* mrt表 */
     }
 
