@@ -75,7 +75,7 @@ void init(void){
 
     while (1)
     {
-        __asm__ __volatile__("hlt");
+        sys_waitpid(-1,NULL);
     }
 }
 

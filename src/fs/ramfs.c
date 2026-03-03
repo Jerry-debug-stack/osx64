@@ -452,9 +452,7 @@ static int ramfs_fsync(UNUSED struct file *file){
 static int ramfs_readdir(struct file *file, struct dirent __user *dirp, unsigned int count)
 {
     inode_t *inode = file->inode;
-    dentry_t *dentry = file->dentry;
     int pos = (int)file->pos;
-    int name_len;
     unsigned int reclen;
 
     char buf[300];
@@ -462,44 +460,13 @@ static int ramfs_readdir(struct file *file, struct dirent __user *dirp, unsigned
     ramfs_node_t *dir_node = (ramfs_node_t *)inode->private_data;
     super_block_t *sb = inode->sb;
 
-    // 处理 "." 和 ".."
-    if (pos == 0) {
-        ud->d_ino = inode->ino;
-        ud->d_type = DT_DIR;
-        strcpy(ud->d_name, ".");
-        name_len = 1;
-        reclen = sizeof(struct dirent) + name_len + 1;
-        if (reclen > count) return -1;
-        ud->d_reclen = reclen;
-        if (copy_to_user(dirp, ud, reclen) != 0)
-            return -1;
-        file->pos = 1;
-        return 0;
-    }
-    if (pos == 1) {
-        inode_t *parent_inode = dentry->parent ? dentry->parent->inode : inode;
-        ud->d_ino = parent_inode->ino;
-        ud->d_type = DT_DIR;
-        strcpy(ud->d_name, "..");
-        name_len = 2;
-        reclen = sizeof(struct dirent) + name_len + 1;
-        if (reclen > count) return -1;
-        ud->d_reclen = reclen;
-        if (copy_to_user(dirp, ud, reclen) != 0)
-            return -1;
-        file->pos = 2;
-        return 0;
-    }
-
-    // 遍历实际子项
-    int idx = pos - 2;
     int i = 0;
     ramfs_dirent_t *de = NULL;
     uint64_t child_ino;
 
     spin_lock(&dir_node->lock);
     list_for_each_entry(de, &dir_node->dir_entries, list) {
-        if (i == idx) {
+        if (i == pos) {
             child_ino = de->ino;
             strcpy(ud->d_name, de->name);
             break;

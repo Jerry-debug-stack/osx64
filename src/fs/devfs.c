@@ -12,15 +12,18 @@
 struct super_block *devfs_sb = NULL;
 
 // 静态函数声明
-static int devfs_lookup(struct inode *dir, struct dentry *dentry);
-static int devfs_create(struct inode *dir, struct dentry *dentry, int mode);
-static int devfs_unlink(struct inode *dir, struct dentry *dentry);
-static int devfs_mkdir(struct inode *dir, struct dentry *dentry, int mode);
-static int devfs_rmdir(struct inode *dir, struct dentry *dentry);
-static int devfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-                        struct inode *new_dir, const char *new_name);
-static int devfs_setattr(struct inode *inode, struct iattr *attr);
+static int devfs_lookup(UNUSED struct inode *dir, UNUSED struct dentry *dentry);
+static int devfs_create(UNUSED struct inode *dir, UNUSED struct dentry *dentry, UNUSED int mode);
+static int devfs_unlink(UNUSED struct inode *dir, UNUSED struct dentry *dentry);
+static int devfs_mkdir(UNUSED struct inode *dir, UNUSED struct dentry *dentry, UNUSED int mode);
+static int devfs_rmdir(UNUSED struct inode *dir, UNUSED struct dentry *dentry);
+static int devfs_rename(UNUSED struct inode *old_dir, UNUSED struct dentry *old_dentry,
+                        UNUSED struct inode *new_dir, UNUSED const char *new_name);
+static int devfs_setattr(UNUSED struct inode *inode, UNUSED struct iattr *attr);
 static int devfs_delete(UNUSED struct inode *inode);
+
+static int devfs_root_open(UNUSED inode_t *inode,UNUSED file_t *file);
+static int devfs_root_readdir(struct file *file, struct dirent __user *dirp, unsigned int count);
 
 // 根 inode 的 inode_operations
 struct inode_operations devfs_root_iops = {
@@ -32,6 +35,15 @@ struct inode_operations devfs_root_iops = {
     .rename = devfs_rename,
     .setattr = devfs_setattr,
     .delete = devfs_delete
+};
+
+struct file_operations devfs_root_file_ops = {
+    .open = devfs_root_open,
+    .readdir = devfs_root_readdir,
+    .read = NULL,
+    .write = NULL,
+    .fsync = NULL,
+    .release = NULL
 };
 
 // 超级块操作
@@ -48,7 +60,7 @@ static inode_t *devfs_read_root_inode(struct super_block *sb)
     atomic_set(&inode->refcount, 1);
     atomic_set(&inode->link_count,1);
     inode->inode_ops = &devfs_root_iops;
-    inode->default_file_ops = NULL;  // 目录没有文件操作
+    inode->default_file_ops = &devfs_root_file_ops;  // 目录没有文件操作
     rwlock_init(&inode->i_meta_lock);
     mutex_init(&inode->i_data_lock);
     INIT_LIST_HEAD(&inode->lru_node);
@@ -116,8 +128,37 @@ static int devfs_setattr(UNUSED struct inode *inode, UNUSED struct iattr *attr)
 
 static int devfs_delete(UNUSED struct inode *inode)
 {
-    //if (inode->private_data){
-    //    kfree(inode->private_data);
-    //}
     return 0;
+}
+
+static int devfs_root_open(UNUSED inode_t *inode,UNUSED file_t *file) {
+    return 0;
+}
+
+static int devfs_root_readdir(struct file *file, struct dirent __user *dirp, unsigned int count){
+    dentry_t *dentry = file->dentry;
+    int pos = (int)file->pos;
+
+    char buf[300];
+    struct dirent *ud = (void *)buf;
+
+    dentry_t *child;
+    int i = 0;
+    list_for_each_entry(child,&dentry->child_list,child_list_item){
+        if (i == pos){
+            ud->d_ino = child->inode->ino;
+            ud->d_type = (child->flags & DENTRY_CHARACTER_DEV) ? DT_CHR : DT_BLK;
+            uint32_t namelen = strlen((void *)child->name) + 1;
+            ud->d_reclen = sizeof(struct dirent) + (uint16_t)namelen;
+            if (ud->d_reclen > count || ud->d_reclen > 300)
+                return -1;
+            memcpy(ud->d_name,child->name,namelen);
+            if (copy_to_user(dirp,ud,ud->d_reclen) != 0)
+                return -1;
+            file->pos++;
+            return 0;
+        }
+        i++;
+    }
+    return -1;
 }

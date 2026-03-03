@@ -336,8 +336,16 @@ void put_to_ready_list_first(pcb_t *task){
     spin_unlock(&cpu->ready_list.lock);
 }
 
+extern int fd_close(pcb_t *proc, int fd);
+
 static void free_task(pcb_t *task){
     if (!task->is_ker){
+        free_ptable_and_mem(task->cr3);
+    }
+    // close all files
+    for (int i = 0; i < NR_OPEN_DEFAULT; i++)
+    {
+        fd_close(task,i);
     }
     kfree(task);
 }
