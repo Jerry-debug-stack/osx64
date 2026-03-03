@@ -40,5 +40,8 @@ _Noreturn void exit(int exit_status);
 void yield(void);
 int waitpid(int pid, int *status);
 int sync(void);
+int fork(void);
+int execv(const char* path, char* const argv[]);
+int reboot(int cmd);
 
 #endif

@@ -34,7 +34,6 @@ void display_server(UNUSED void *arg)
     for (int i = 0; i < MAX_TTYS; i++)
     {
         if (master_fds[i] >= 0) {
-            if (i == 0)
             kernel_thread_link_init("sh_runner",sh_runner,(void*)(long)i);
         }
     }

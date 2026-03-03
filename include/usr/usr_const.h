@@ -32,6 +32,9 @@
 #define DT_SOCK 12 /* Unix domain socket */
 #define DT_WHT 14 /* Whiteout */
 
+#define REBOOT_CMD_POWER_OFF 0
+#define REBOOT_CMD_RESTART 1
+
 #ifdef __GNUC__
 #define UNUSED __attribute__((unused))
 #else

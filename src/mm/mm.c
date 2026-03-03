@@ -380,6 +380,87 @@ void free_ptable_and_mem(uint64_t pml4_vir) {
     kfree((void *)pml4_vir);
 }
 
+static void copy_user_pagetable(uint64_t *src_pt, uint64_t *dst_pt, int level) {
+    // level: 1=PDPT, 2=PD, 3=PT
+    for (int i = 0; i < 512; i++) {
+        uint64_t src_pte = src_pt[i];
+        if (!(src_pte & PAGE_PRESENT)){
+            dst_pt[i] = 0;
+            continue;
+        }
+
+        // 检查是否为大页（仅当 level < 3 时可能）
+        if (src_pte & PAGE_BIG_ENTRY) {
+            // 系统假设只使用4K页，遇到大页则停机
+            halt();
+        }
+
+        if (level == 3) {
+            // 最后一级页表：复制物理页
+            uint64_t src_phy = src_pte & 0xfffffffffffff000;
+            void *src_vir = easy_phy2linear(src_phy);
+            void *new_page = kmalloc(4096);
+            uint64_t new_phy = (uint64_t)easy_linear2phy(new_page);
+            memcpy(new_page, src_vir, 4096);
+            uint64_t flags = src_pte & 0xfff;          // 保留原权限位
+            dst_pt[i] = new_phy | flags;
+        } else {
+            // 中间级页表：确保目标项存在，并递归下一级
+            uint64_t src_next_phy = src_pte & 0xfffffffffffff000;
+            void *src_next_vir = easy_phy2linear(src_next_phy);
+
+            if (!(dst_pt[i] & PAGE_PRESENT)) {
+                void *new_table = kmalloc(4096);
+                uint64_t new_table_phy = (uint64_t)easy_linear2phy(new_table);
+                memset(new_table, 0, 4096);
+                uint64_t flags = src_pte & 0xfff;      // 保留原权限位
+                dst_pt[i] = new_table_phy | flags;
+            }
+
+            uint64_t dst_next_phy = dst_pt[i] & 0xfffffffffffff000;
+            void *dst_next_vir = easy_phy2linear(dst_next_phy);
+            copy_user_pagetable((uint64_t*)src_next_vir, (uint64_t*)dst_next_vir, level + 1);
+        }
+    }
+}
+
+void copy_pagetable_and_mem(uint64_t dest, uint64_t source) {
+    // 1. 直接复制内核部分（后256项）
+    memcpy((void*)(dest + 256 * 8), (void*)(source + 256 * 8), 256 * 8);
+
+    // 2. 处理用户部分（前256项）
+    uint64_t *src_pml4 = (uint64_t*)source;
+    uint64_t *dst_pml4 = (uint64_t*)dest;
+    for (int i = 0; i < 256; i++) {
+        uint64_t src_pte = src_pml4[i];
+        if (!(src_pte & PAGE_PRESENT)){
+            dst_pml4[i] = 0;
+            continue;
+        }
+
+        // 检查PML4层的大页（一般不会出现）
+        if (src_pte & PAGE_BIG_ENTRY) {
+            halt();
+        }
+
+        uint64_t src_next_phy = src_pte & 0xfffffffffffff000;
+        void *src_next_vir = easy_phy2linear(src_next_phy);
+
+        // 确保目标PML4项存在
+        if (!(dst_pml4[i] & PAGE_PRESENT)) {
+            void *new_table = kmalloc(4096);
+            uint64_t new_table_phy = (uint64_t)easy_linear2phy(new_table);
+            memset(new_table, 0, 4096);
+            uint64_t flags = src_pte & 0xfff;          // 保留原权限位
+            dst_pml4[i] = new_table_phy | flags;
+        }
+
+        uint64_t dst_next_phy = dst_pml4[i] & 0xfffffffffffff000;
+        void *dst_next_vir = easy_phy2linear(dst_next_phy);
+        copy_user_pagetable((uint64_t*)src_next_vir, (uint64_t*)dst_next_vir, 1);
+    }
+}
+
 static inline void flush_tlb(void)
 {
     __asm__ __volatile__("movq %%cr3,%%rax;movq %%rax,%%cr3;" ::: "rax");

@@ -29,6 +29,8 @@ _Noreturn void sys_exit(int exit_status);
 void sys_yield(void);
 int sys_waitpid(int pid, int *status);
 int sys_sync(void);
+int sys_execv(const char* path, char* const argv[]);
+int sys_reboot(int cmd);
 
 void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_get_ticks,
@@ -55,4 +57,7 @@ void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_yield,
     sys_waitpid,
     sys_sync,
+    NULL, /* fork */
+    sys_execv,
+    sys_reboot
 };

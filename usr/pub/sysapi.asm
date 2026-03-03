@@ -22,6 +22,9 @@ global exit
 global yield
 global waitpid
 global sync
+global fork
+global execv
+global reboot
 
 section .text
     bits 64
@@ -142,5 +145,20 @@ section .text
 
     sync:
         mov rax,23
+        int 0x80
+        ret
+    
+    fork:
+        mov rax,24
+        int 0x80
+        ret
+    
+    execv:
+        mov rax,25
+        int 0x80
+        ret
+
+    reboot:
+        mov rax,26
         int 0x80
         ret

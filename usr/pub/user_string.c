@@ -66,6 +66,19 @@ void memset(void* dest, uint8_t data, uint32_t size)
         d[i] = data;
 }
 
+char *strchr(const char *s, int c) {
+    while (*s != '\0') {
+        if (*s == (char)c) {
+            return (char *)s;
+        }
+        s++;
+    }
+    if ((char)c == '\0') {
+        return (char *)s;
+    }
+    return (void *)0;
+}
+
 char *strrchr(const char *s, int c) {
     const char *last = (void*)0;
     char ch = (char)c;

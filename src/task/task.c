@@ -14,6 +14,7 @@ extern void asm_task_start_go_out(void);
 extern void task_switch_unlock(pcb_t *old,pcb_t *new,spinlock_t *lock, int *preempt_count);
 extern void task_switch_double_unlock(pcb_t *old,pcb_t *new,spinlock_t *lock, int *preempt_count,spinlock_t *wq_lock);
 extern _Noreturn void asm_task_start(uint64_t rsp);
+extern void asm_fork_child_back(void);
 
 extern void init(void);
 extern void idle(void);
@@ -24,7 +25,7 @@ pcb_t *pcb_of_init;
 static uint32_t alloc_pid_and_add_to_all_list(pcb_t *new_task);
 static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n);
 static void free_task(pcb_t *task);
-static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent,void *arg);
+static pcb_t *put_thread(char *name, void *addr, pcb_t *parent,bool is_ker,void *arg);
 static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n,void *arg);
 
 void init_task(void)
@@ -39,7 +40,7 @@ void init_task(void)
         item = &cpus->items[i];
         spin_list_init(&item->ready_list);
         item->total_ready_num = 0;
-        pcb_t *pcb_of_idle = put_kernel_thread("idle",idle,NULL,NULL);
+        pcb_t *pcb_of_idle = put_thread("idle",idle,NULL,true,NULL);
         item->idle = pcb_of_idle;
         item->now_running = NULL;
     }
@@ -55,7 +56,7 @@ static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n,void
         target = n;
     }
     uint8_t intr = io_cli();
-    pcb_t *ret = put_kernel_thread(name,addr,parent,arg);
+    pcb_t *ret = put_thread(name,addr,parent,true,arg);
     add_to_cpu_n_ready_list(ret,target);
     io_set_intr(intr);
     return ret;
@@ -75,7 +76,7 @@ extern uint64_t *vir_ptable4;
  * parent选项的存在是为了可能的疑难问题
  * @todo 加上对args的support
  */
-static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent,void *arg)
+static pcb_t *put_thread(char *name, void *addr, pcb_t *parent,bool is_ker,void *arg)
 {
     pcb_t *new_task = kmalloc(DEFAULT_PCB_SIZE);
     INIT_LIST_HEAD(&new_task->all_list);
@@ -119,7 +120,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent,void *arg)
     for (int i = 0; i < NR_OPEN_DEFAULT; i++){
         new_task->files[i] = NULL;
     }
-    new_task->is_ker = true;
+    new_task->is_ker = is_ker;
     new_task->magic = TASK_MAGIC;
     new_task->signal = 0;
     new_task->state = TASK_STATE_READY;
@@ -129,13 +130,21 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent,void *arg)
     memset(task_start, 0, sizeof(registers_t) + sizeof(task_start_t));
     
     task_start->ret = (uint64_t)asm_task_start_go_out;
-    reg->cs = SELECTOR_KERNEL_CS;
-    reg->ds = reg->es = reg->ss = SELECTOR_KERNEL_DS;
-    reg->rip = (uint64_t)addr;
+    if (is_ker){
+        reg->cs = SELECTOR_KERNEL_CS;
+        reg->ds = reg->es = reg->ss = SELECTOR_KERNEL_DS;
+        reg->rflags = 0x202;
+        reg->rip = (uint64_t)addr;
+    }else{
+        reg->cs = SELECTOR_APPLICATION_CS;
+        reg->ds = reg->es = reg->ss = SELECTOR_APPLICATION_DS;
+        reg->rflags = 0x202;
+        reg->rip = 0;
+    }
+    
     reg->rsp = (uint64_t)new_task + DEFAULT_PCB_SIZE;
     reg->rdi = (uint64_t)arg;
-    reg->rflags = 0x202;
-    
+
     new_task->rsp = (uint64_t)task_start;
     return new_task;
 }
@@ -160,7 +169,8 @@ static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n){
     task->cpuid = n;
     spin_list_head_t *tar_ready_list = &cpus->items[n].ready_list;
     spin_lock(&tar_ready_list->lock);
-    list_add_tail(&task->ready_list_item,&tar_ready_list->list);
+    //list_add_tail(&task->ready_list_item,&tar_ready_list->list);
+    list_add(&task->ready_list_item,&tar_ready_list->list);
     cpus->items[n].total_ready_num++;
     spin_unlock(&tar_ready_list->lock);
 }
@@ -380,6 +390,7 @@ int sys_execv(const char* path, char* const argv[])
         len += strlen(argv[i]) + 1;
         i++;
     }
+    len = (len + 7) & 0xfff;
     if (i > 31 || (len + (i << 3) >= 3072)){
         return -5;
     }
@@ -396,7 +407,7 @@ int sys_execv(const char* path, char* const argv[])
 
     char* temp = kmalloc(4096);
     char* pos = temp + 4096;
-    char** new_argv = (char**)(pos - len - i - 8);
+    char** new_argv = (char**)(pos - len - i * 8 - 8);
     i = 0;
     while (argv[i] != 0) {
         len = strlen(argv[i]) + 1;
@@ -442,6 +453,45 @@ int sys_execv(const char* path, char* const argv[])
         (uint64_t)current + DEFAULT_PCB_SIZE - sizeof(registers_t),
         ((uint64_t)new_argv) - (uint64_t)temp + (VIRTUAL_ADDR_USER_HIGHEST - 4096) - 8,
         header->elf_entry,
-        (uint64_t)new_argv
+        ((uint64_t)new_argv) - (uint64_t)temp + (VIRTUAL_ADDR_USER_HIGHEST - 4096)
     );
+}
+
+/// @brief fork 一个子进程(对于用户进程)
+/// @param rsp 内核栈在调用前的指针
+/// @return 返回子进程编号
+int fork_enter(unsigned long rsp)
+{
+    pcb_t* current = get_current();
+    if (current->is_ker)
+        return -1;
+    uint64_t* cr3 = kmalloc(4096);
+    memset(cr3, 0, 2048);
+    memcpy(cr3 + 256, vir_ptable4 + 256, 2048);
+
+    copy_pagetable_and_mem((uint64_t)cr3,current->cr3);
+
+    pcb_t *child = put_thread(current->name,NULL,current,false,NULL);
+    int ret = child->pid;
+    child->cr3 = (uint64_t)cr3;
+
+    for (int i = 0; i < NR_OPEN_DEFAULT; i++)
+    {
+        child->files[i] = current->files[i];
+        if (current->files[i]){
+            atomic_inc(&current->files[i]->refcount);
+        }
+    }
+
+    memcpy((void *)((uint64_t)child + sizeof(pcb_t)),(void *)((uint64_t)current + sizeof(pcb_t)),DEFAULT_PCB_SIZE - sizeof(pcb_t));    
+    child->rsp = rsp - sizeof(task_start_t) - (uint64_t)current + (uint64_t)child;
+    task_start_t *t_start = (void *)child->rsp;
+    t_start->ret = (uint64_t)asm_fork_child_back;
+    
+    registers_t *regs = (void *)(t_start + 1);
+    regs->rax = 0;
+
+    add_to_cpu_n_ready_list(child,0);
+
+    return ret;
 }

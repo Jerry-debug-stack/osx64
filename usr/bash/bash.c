@@ -30,6 +30,7 @@ static int bash_touch(char* argv[], int length);
 static int bash_cat(char* argv[], int length);
 static int bash_rm(char* argv[], int length);
 static int bash_mv(char* argv[], int length);
+static int bash_cp(char* argv[], int length);
 static int bash_reboot(UNUSED char* argv[], int length);
 static int bash_poweroff(UNUSED char* argv[], int length);
 static int bash_whoami(UNUSED char* argv[], int length);
@@ -49,6 +50,7 @@ static shell_function_t functions[] = {
     { "cat", bash_cat },
     { "rm", bash_rm },
     { "mv", bash_mv },
+    { "cp", bash_cp },
     { "reboot", bash_reboot },
     { "poweroff", bash_poweroff },
     { "whoami", bash_whoami },
@@ -64,7 +66,7 @@ static void free_command(struct command_line* cmd);
 char* non_argv[] = { 0 };
 char name[64];
 
-int bash_main(UNUSED char* argv[])
+int main(UNUSED char* argv[])
 {
     name[0] = 0;
     char* buffer = malloc(1024);
@@ -109,13 +111,12 @@ static int do_bash(struct command_line* cmd)
             }
             i++;
         }
-        //int id = fork();
-        //if (id == 0) {
-        //    printf("forked\n");
-        //    exit(execv(cmd->command, cmd->args));
-        //} else {
-        //    waitpid(id, &ret, 0);
-        //}
+        int id = fork();
+        if (id == 0) {
+            exit(execv((void *)cmd->command, (void *)cmd->args));
+        } else {
+            waitpid(id, &ret);
+        }
     end:
         if (!builtin) {
             if (ret != 0) {
@@ -323,11 +324,77 @@ static int bash_mv(char* argv[], int length)
     }
 }
 
+static int bash_cp(char* argv[], int length)
+{
+    if (length != 2) {
+        printf("cp [source] [destination]\nCopy file.\n");
+        return -1;
+    }
+
+    const char *src = argv[0];
+    const char *dst = argv[1];
+
+    int src_fd = open(src, O_RDONLY, 0);
+    if (src_fd < 0) {
+        printf("cp: cannot open '%s'\n", src);
+        return -1;
+    }
+
+    int dst_fd = open(dst, O_WRONLY | O_CREAT, 0644);
+    if (dst_fd < 0) {
+        close(src_fd);
+        printf("cp: cannot create '%s'\n", dst);
+        return -1;
+    }
+
+    if (ftruncate(dst_fd, 0) < 0) {
+        close(src_fd);
+        close(dst_fd);
+        printf("cp: cannot truncate '%s'\n", dst);
+        return -1;
+    }
+
+    lseek(dst_fd, 0, SEEK_SET);
+
+    char buf[4096];
+    ssize_t bytes_read, bytes_written;
+
+    while (1) {
+        bytes_read = read(src_fd, buf, sizeof(buf));
+        if (bytes_read < 0) {
+            printf("cp: read error\n");
+            close(src_fd);
+            close(dst_fd);
+            return -1;
+        }
+        if (bytes_read == 0)
+            break;
+
+        char *p = buf;
+        ssize_t remaining = bytes_read;
+        while (remaining > 0) {
+            bytes_written = write(dst_fd, p, remaining);
+            if (bytes_written < 0) {
+                printf("cp: write error\n");
+                close(src_fd);
+                close(dst_fd);
+                return -1;
+            }
+            remaining -= bytes_written;
+            p += bytes_written;
+        }
+    }
+
+    close(src_fd);
+    close(dst_fd);
+    printf("cp: copied '%s' to '%s'\n", src, dst);
+    return 0;
+}
+
 static int bash_reboot(UNUSED char* argv[], int length)
 {
-    if (length == 0){
-    }
-        //reboot(LINUX_REBOOT_CMD_RESTART);
+    if (length == 0)
+        reboot(REBOOT_CMD_RESTART);
     else
         printf("reboot\nto restart your computer\n");
     return -1;
@@ -335,9 +402,8 @@ static int bash_reboot(UNUSED char* argv[], int length)
 
 static int bash_poweroff(UNUSED char* argv[], int length)
 {
-    if (length == 0){
-    }
-        //reboot(LINUX_REBOOT_CMD_POWER_OFF);
+    if (length == 0)
+        reboot(REBOOT_CMD_POWER_OFF);
     else
         printf("poweroff\nto power off your computer\n");
     return -1;

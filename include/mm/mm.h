@@ -10,6 +10,7 @@ void rm_page_4k(uint64_t vir_addr, uint64_t ptable_vir);
 void put_page_2M(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir);
 
 void free_ptable_and_mem(uint64_t pml4_vir);
+void copy_pagetable_and_mem(uint64_t dest,uint64_t source);
 
 uint64_t alloc_page_4k(void);
 uint8_t decrease_reference_page_4k(uint64_t addr);

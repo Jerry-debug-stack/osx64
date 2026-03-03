@@ -10,6 +10,7 @@ uint32_t strlen(const char* str);
 uint32_t strcpy(char* dest, char* source);
 uint8_t strcmp(const char *s1, const char *s2);
 char *kstrdup(const char *s);
+char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 char *strtok_r(char *str, const char *delim, char **saveptr);
 int strncmp(const char *s1, const char *s2, uint64_t n);
