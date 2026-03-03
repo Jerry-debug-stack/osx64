@@ -205,7 +205,7 @@ uint8_t add_reference_page_4k(uint64_t addr)
 }
 
 /// @param type: 0 for kernel 1 for user4k other for user4k protected
-void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type)
+void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type)
 {
     if (vir_addr & 0xfff) {
         halt();
@@ -249,6 +249,12 @@ void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint
     }
     ptable[layer[3]] = phy_addr | item_type;
     invlpg_tlb(vir_addr);
+}
+
+void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type){
+    spin_lock(&mm.lock);
+    __put_page_4k_locked(phy_addr,vir_addr,ptable_vir,type);
+    spin_unlock(&mm.lock);
 }
 
 int exist_page_4k(uint64_t vir_addr, uint64_t ptable_vir) {

@@ -64,7 +64,7 @@ int elf_file_copy(int fd, elf64_header_t* header, uint64_t cr3)
                     io_set_intr(intr);
                 }
             }
-            sys_lseek(fd,SEEK_SET,p_header_tbl[i].part_offset);
+            sys_lseek(fd,p_header_tbl[i].part_offset,SEEK_SET);
             sys_read(fd,(void*)p_header_tbl[i].part_vaddr,p_header_tbl[i].part_file_size);
         }
     }

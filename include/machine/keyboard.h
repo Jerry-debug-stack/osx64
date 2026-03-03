@@ -57,7 +57,6 @@ typedef struct {
 extern kbd_status_t *kbd_status;
 
 void init_keyboard(void);
-void keyboard_input_put(keycode_t code);
-size_t keyboard_read_events(keycode_t *buf, size_t max_events);
+size_t keyboard_read(keycode_t *buf, size_t length);
 
 #endif

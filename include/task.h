@@ -75,13 +75,16 @@ extern pcb_t *pcb_of_init;
 pcb_t *get_current(void);
 void put_to_ready_list_first(pcb_t *task);
 
-void kernel_thread_default(char *name, void *addr);
-void kernel_thread_link_init(char *name, void *addr);
+int kernel_thread_default(char *name, void *addr,void *arg);
+int kernel_thread_link_init(char *name, void *addr,void *arg);
+
+int sys_waitpid(int pid, int *status);
+_Noreturn void sys_exit(int exit_status);
 
 void schedule(void);
 void __schedule_locked(uint8_t intr);
 void __schedule_other_locked(spinlock_t *wq_lock);
-void yield(void);
+void sys_yield(void);
 static inline void preempt_disable(void) {
     pcb_t *current = get_current();
     current->preempt_count++;
@@ -91,6 +94,6 @@ static inline void preempt_enable(void) {
     current->preempt_count--;
 }
 
-int sys_execv_end(const char* path, char* const argv[]);
+int sys_execv(const char* path, char* const argv[]);
 
 #endif

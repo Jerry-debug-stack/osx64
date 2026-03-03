@@ -1,7 +1,6 @@
 #ifndef OS_FONT_H
 #define OS_FONT_H
 
-#define NULL 0x0
 #define BACK_SPACE '\b'
 #define NEXT_LINE '\n'
 #define NEXT_PAGE '\f'

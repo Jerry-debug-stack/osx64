@@ -24,8 +24,8 @@ pcb_t *pcb_of_init;
 static uint32_t alloc_pid_and_add_to_all_list(pcb_t *new_task);
 static void add_to_cpu_n_ready_list(pcb_t *task,uint32_t n);
 static void free_task(pcb_t *task);
-static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent);
-static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n);
+static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent,void *arg);
+static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n,void *arg);
 
 void init_task(void)
 {
@@ -39,15 +39,15 @@ void init_task(void)
         item = &cpus->items[i];
         spin_list_init(&item->ready_list);
         item->total_ready_num = 0;
-        pcb_t *pcb_of_idle = put_kernel_thread("idle",idle,NULL);
+        pcb_t *pcb_of_idle = put_kernel_thread("idle",idle,NULL,NULL);
         item->idle = pcb_of_idle;
         item->now_running = NULL;
     }
     /* 初始化init进程 */
-    pcb_of_init = kernel_thread("init",init,NULL,-1);
+    pcb_of_init = kernel_thread("init",init,NULL,-1,NULL);
 }
 
-static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n){
+static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n,void *arg){
     uint32_t target;
     if (n == (uint32_t)-1){
         target = get_logic_cpu_id();
@@ -55,7 +55,7 @@ static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n){
         target = n;
     }
     uint8_t intr = io_cli();
-    pcb_t *ret = put_kernel_thread(name,addr,parent);
+    pcb_t *ret = put_kernel_thread(name,addr,parent,arg);
     add_to_cpu_n_ready_list(ret,target);
     io_set_intr(intr);
     return ret;
@@ -75,7 +75,7 @@ extern uint64_t *vir_ptable4;
  * parent选项的存在是为了可能的疑难问题
  * @todo 加上对args的support
  */
-static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
+static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent,void *arg)
 {
     pcb_t *new_task = kmalloc(DEFAULT_PCB_SIZE);
     INIT_LIST_HEAD(&new_task->all_list);
@@ -133,6 +133,7 @@ static pcb_t *put_kernel_thread(char *name, void *addr, pcb_t *parent)
     reg->ds = reg->es = reg->ss = SELECTOR_KERNEL_DS;
     reg->rip = (uint64_t)addr;
     reg->rsp = (uint64_t)new_task + DEFAULT_PCB_SIZE;
+    reg->rdi = (uint64_t)arg;
     reg->rflags = 0x202;
     
     new_task->rsp = (uint64_t)task_start;
@@ -289,12 +290,10 @@ int sys_waitpid(int pid, int *status)
     CPU_ITEM *this_cpu = &cpus->items[cpu_id];
     pcb_t *now_pcb = this_cpu->now_running;
     while (1) {
-        int found_child = 0;
         spin_lock(&now_pcb->childs.lock);
         pcb_t *child;
         list_for_each_entry(child, &now_pcb->childs.list, child_list_item) {
             if (pid == -1 || child->pid == pid) {
-                found_child = 1;
                 if (child->state == TASK_ZOMBIE) {
                     int exit_code = child->exit_status;
                     list_del(&child->child_list_item);
@@ -307,9 +306,6 @@ int sys_waitpid(int pid, int *status)
             }
         }
         spin_unlock(&now_pcb->childs.lock);
-        if (!found_child)
-            return -1;
-
         sleep_on(&now_pcb->wait_queue);
     }
 }
@@ -336,7 +332,7 @@ static void free_task(pcb_t *task){
     kfree(task);
 }
 
-void yield(void){
+void sys_yield(void){
     uint8_t intr = io_cli();
     uint32_t id = get_logic_cpu_id();
     CPU_ITEM *cpu = &cpus->items[id];
@@ -361,18 +357,20 @@ int init_cwd_for_started_tasks(struct dentry *root){
     return ret;
 }
 
-void kernel_thread_default(char *name, void *addr){
-    kernel_thread(name,addr,get_current(),0);
+int kernel_thread_default(char *name, void *addr,void *arg){
+    pcb_t *new = kernel_thread(name,addr,get_current(),0,arg);
+    return new->pid;
 }
 
-void kernel_thread_link_init(char *name, void *addr){
-    kernel_thread(name,addr,pcb_of_init,0);
+int kernel_thread_link_init(char *name, void *addr,void *arg){
+    pcb_t *new = kernel_thread(name,addr,pcb_of_init,0,arg);
+    return new->pid;
 }
 
 #include "lib/elf.h"
 _Noreturn void asm_execv_out(uint64_t a,uint64_t b,uint64_t c,uint64_t d);
 
-int sys_execv_end(const char* path, char* const argv[])
+int sys_execv(const char* path, char* const argv[])
 {
     if (!path)
         return -1;

@@ -164,7 +164,7 @@ void init_ap(void){
     ap_startup_lock = 0;
     broadcast_ipi_startup();
     while(cpus->total_num > ap_ready_num + 1) __asm__ __volatile__("pause");
-    color_print("[BspCore] All AP start up finished!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    wb_printf("[BspCore] All AP start up finished!\n");
     vir_ptable4[0] = 0;
     uint64_t tmp;
     __asm__ __volatile__("movq %%cr3, %0\n\t""movq %0, %%cr3": "=r" (tmp):: "memory");

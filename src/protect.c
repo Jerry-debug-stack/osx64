@@ -150,6 +150,8 @@ void make_idt_descriptor(uint64_t* idt_table, uint32_t n, uint64_t addr, uint64_
     *(idt_table + 2 * n + 1) = addr >> 32;
 }
 
+extern bool multi_core_start;
+
 void exception_handler(
     UNUSED unsigned long ignore1, UNUSED unsigned long ignore2, UNUSED unsigned long ignore3, UNUSED unsigned long ignore4, UNUSED unsigned long ignore5, UNUSED unsigned long ignore6,
     UNUSED unsigned long ignore7, UNUSED unsigned long ignore8, UNUSED unsigned long ignore9, UNUSED unsigned long ignore10, UNUSED unsigned long ignore11, UNUSED unsigned long ignore12,
@@ -160,6 +162,32 @@ void exception_handler(
     unsigned long rsp, unsigned long ss)
 {
     __asm__ __volatile__("cli");
+    if (multi_core_start){
+        pcb_t *current = get_current();
+        if (current->is_ker)
+            goto fail;
+        if (interrupt_num == 18 || interrupt_num == 10 || interrupt_num == 8 || interrupt_num == 2)
+            goto fail;
+        if (interrupt_num == 14) {
+            if ((error_no & PAGEFAULT_PRESENT) == 0) {
+                unsigned long vir_page;
+                __asm__ __volatile__("mov %%cr2, %0" : "=r"(vir_page));
+                vir_page = (vir_page >> 12) << 12;
+                if (vir_page < VIRTUAL_ADDR_USER_HIGHEST && vir_page != 0){
+                    uint64_t phy_page = (uint64_t)easy_linear2phy(kmalloc(4096));
+                    put_page_4k(phy_page,vir_page,current->cr3,1);
+                    __asm__ __volatile__("invlpg (%0);" ::"r"(vir_page) : "memory");
+                    return;
+                }
+            }
+        }else if (interrupt_num == 1){ /* 未来的debug? */}
+        color_printf("[ ERROR ] task named %s exit because of interrupt %d\n[ ERROR ] rip 0x%lx cs 0x%x rflags 0x%lx rsp:0x%lx ss:0x%x\n",
+            VIEW_COLOR_RED,VIEW_COLOR_WHITE,
+            current->name,interrupt_num,rip,cs,rflags,rsp,ss
+        );
+        sys_exit(-1);
+    }
+fail:
     color_printf("ERROR HAPPENDED\nIntr:%d err_no:%#lx\ncs:%#lx rip:%#lx\nss:%#lx rsp:%#lx\nrflags:%#lx",
         VIEW_COLOR_RED, VIEW_COLOR_WHITE, interrupt_num, error_no, cs, rip, ss, rsp, rflags);
     while (1) {

@@ -38,21 +38,19 @@ static void ldisc_input(struct pty_pair *pair, const char *data, size_t len)
         char c = data[i];
         if (c == '\n') {
             // 回车：提交当前行
-            if (ld->line_pos > 0) {
-                char *line = kmalloc(ld->line_pos + 1);
-                if (line) {
-                    memcpy(line, ld->line_buf, ld->line_pos);
-                    line[ld->line_pos] = '\0';
-                    int next = (ld->completed_head + 1) % LINE_QUEUE_SIZE;
-                    if (next != ld->completed_tail) {
-                        ld->completed_lines[ld->completed_head] = line;
-                        ld->completed_head = next;
-                    } else {
-                        kfree(line); // 队列满，丢弃
-                    }
+            char *line = kmalloc(ld->line_pos + 1);
+            if (line) {
+                memcpy(line, ld->line_buf, ld->line_pos);
+                line[ld->line_pos] = '\0';
+                int next = (ld->completed_head + 1) % LINE_QUEUE_SIZE;
+                if (next != ld->completed_tail) {
+                    ld->completed_lines[ld->completed_head] = line;
+                    ld->completed_head = next;
+                } else {
+                    kfree(line); // 队列满，丢弃
                 }
-                ld->line_pos = 0;
             }
+            ld->line_pos = 0;
             if (ld->termios.c_lflag){
                 ldisc_echo(pair, "\n", 1);
             }
@@ -179,7 +177,7 @@ static ssize_t pty_slave_read(struct file *file, char *buf, size_t len, UNUSED l
         return 0; // 无数据，非阻塞
     }
     char *line = ld->completed_lines[ld->completed_tail];
-    int line_len = strlen(line);
+    int line_len = strlen(line) + 1;
     if ((unsigned long)line_len > len) {
         // 如果用户缓冲区不够大，只拷贝前 len 字节（通常应处理剩余，但简化）
         memcpy(buf, line, len);

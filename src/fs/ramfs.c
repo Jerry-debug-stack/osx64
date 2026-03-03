@@ -456,32 +456,36 @@ static int ramfs_readdir(struct file *file, struct dirent __user *dirp, unsigned
     int pos = (int)file->pos;
     int name_len;
     unsigned int reclen;
-    struct dirent ud;
+
+    char buf[300];
+    struct dirent *ud = (void *)buf;
+    ramfs_node_t *dir_node = (ramfs_node_t *)inode->private_data;
+    super_block_t *sb = inode->sb;
 
     // 处理 "." 和 ".."
     if (pos == 0) {
-        ud.d_ino = inode->ino;
-        ud.d_type = DT_DIR;
-        strcpy(ud.d_name, ".");
+        ud->d_ino = inode->ino;
+        ud->d_type = DT_DIR;
+        strcpy(ud->d_name, ".");
         name_len = 1;
         reclen = sizeof(struct dirent) + name_len + 1;
         if (reclen > count) return -1;
-        ud.d_reclen = reclen;
-        if (copy_to_user(dirp, &ud, reclen) != 0)
+        ud->d_reclen = reclen;
+        if (copy_to_user(dirp, ud, reclen) != 0)
             return -1;
         file->pos = 1;
         return 0;
     }
     if (pos == 1) {
         inode_t *parent_inode = dentry->parent ? dentry->parent->inode : inode;
-        ud.d_ino = parent_inode->ino;
-        ud.d_type = DT_DIR;
-        strcpy(ud.d_name, "..");
+        ud->d_ino = parent_inode->ino;
+        ud->d_type = DT_DIR;
+        strcpy(ud->d_name, "..");
         name_len = 2;
         reclen = sizeof(struct dirent) + name_len + 1;
         if (reclen > count) return -1;
-        ud.d_reclen = reclen;
-        if (copy_to_user(dirp, &ud, reclen) != 0)
+        ud->d_reclen = reclen;
+        if (copy_to_user(dirp, ud, reclen) != 0)
             return -1;
         file->pos = 2;
         return 0;
@@ -490,33 +494,42 @@ static int ramfs_readdir(struct file *file, struct dirent __user *dirp, unsigned
     // 遍历实际子项
     int idx = pos - 2;
     int i = 0;
-    dentry_t *child = NULL;
-    struct list_head *p;
-    list_for_each(p, &dentry->child_list) {
+    ramfs_dirent_t *de = NULL;
+    uint64_t child_ino;
+
+    spin_lock(&dir_node->lock);
+    list_for_each_entry(de, &dir_node->dir_entries, list) {
         if (i == idx) {
-            child = container_of(p, dentry_t, child_list_item);
+            child_ino = de->ino;
+            strcpy(ud->d_name, de->name);
             break;
         }
         i++;
     }
-    if (!child)
+    if (!de) { // 没有找到对应条目，表示目录结束
+        spin_unlock(&dir_node->lock);
         return -1;
+    }
+    spin_unlock(&dir_node->lock);
 
-    ud.d_ino = child->inode->ino;
-    if (S_ISDIR(child->inode->mode))
-        ud.d_type = DT_DIR;
-    else if (S_ISREG(child->inode->mode))
-        ud.d_type = DT_REG;
+    // 根据子节点 inode 号获取节点，以确定文件类型
+    ramfs_node_t *child_node = ramfs_find_node(sb, child_ino);
+    if (!child_node) {
+        return -1;
+    }
+
+    ud->d_ino = child_ino;
+    if (S_ISDIR(child_node->mode))
+        ud->d_type = DT_DIR;
+    else if (S_ISREG(child_node->mode))
+        ud->d_type = DT_REG;
     else
-        ud.d_type = DT_UNKNOWN;
+        ud->d_type = DT_UNKNOWN;
 
-    name_len = strlen(child->name);
-    reclen = sizeof(struct dirent) + name_len + 1;
+    reclen = sizeof(struct dirent) + strlen(ud->d_name) + 1;
     if (reclen > count) return -1;
-    ud.d_reclen = reclen;
-    memcpy(ud.d_name, child->name, name_len + 1);
-
-    if (copy_to_user(dirp, &ud, reclen) != 0)
+    ud->d_reclen = reclen;
+    if (copy_to_user(dirp, ud, reclen) != 0)
         return -1;
 
     file->pos = pos + 1;

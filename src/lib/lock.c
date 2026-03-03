@@ -82,8 +82,10 @@ void mutex_init(mutex_t *lock)
 /* 获取互斥锁（可能睡眠） */
 void mutex_lock(mutex_t *lock)
 {
+    spin_lock(&lock->queue_lock);
     /* 尝试快速获取 */
     if (__sync_bool_compare_and_swap(&lock->locked, 0, 1)) {
+        spin_unlock(&lock->queue_lock);
         return;
     }
     
@@ -91,36 +93,25 @@ void mutex_lock(mutex_t *lock)
     wait_queue_entry_t wait;
     wait.task = get_current();  // 获取当前任务
     
-    /* 加入等待队列 */
-    spin_lock(&lock->queue_lock);
+    uint32_t intr = io_cli();
+    pcb_t *current = get_current();
+    list_add_tail(&wait.list, &lock->wait_queue);
+    current->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
+    __schedule_other_locked(&lock->queue_lock);
+    io_set_intr(intr);
     
-    if (lock->locked) {
-        uint32_t intr = io_cli();
-        pcb_t *current = get_current();
-        list_add_tail(&wait.list, &lock->wait_queue);
-        current->state = TASK_STATE_SLEEP_NOT_INTR_ABLE;
-        __schedule_other_locked(&lock->queue_lock);
-        io_set_intr(intr);
-        
-        /* 被唤醒后，重新尝试获取锁 */
-        while (__sync_lock_test_and_set(&lock->locked, 1)) {
-            schedule();
-        }
-    } else {
-        /* 在这段时间内锁被释放了，直接获取 */
-        lock->locked = 1;
-        spin_unlock(&lock->queue_lock);
+    /* 被唤醒后，重新尝试获取锁 */
+    while (__sync_lock_test_and_set(&lock->locked, 1)) {
+        schedule();
     }
 }
 
 /* 释放互斥锁 */
 void mutex_unlock(mutex_t *lock)
 {
-    /* 清除锁标志 */
-    __sync_lock_release(&lock->locked);
-    
     /* 检查等待队列 */
     spin_lock(&lock->queue_lock);
+    lock->locked = 0;
     if (!list_empty(&lock->wait_queue)) {
         /* 唤醒第一个等待者 */
         struct wait_queue_entry *wait;
@@ -135,7 +126,10 @@ void mutex_unlock(mutex_t *lock)
 /* 尝试获取互斥锁（非阻塞） */
 int mutex_trylock(mutex_t *lock)
 {
-    return __sync_bool_compare_and_swap(&lock->locked, 0, 1);
+    spin_lock(&lock->queue_lock);
+    int ret = __sync_bool_compare_and_swap(&lock->locked, 0, 1);
+    spin_unlock(&lock->queue_lock);
+    return ret;
 }
 
 /* ====================== 读写锁实现 ====================== */
@@ -159,7 +153,7 @@ void read_lock(rwlock_t *lock)
             break;
         }
         spin_unlock(&lock->lock);
-        yield();
+        sys_yield();
     }
 }
 
@@ -182,7 +176,7 @@ void write_lock(rwlock_t *lock)
             break;
         }
         spin_unlock(&lock->lock);
-        yield();
+        sys_yield();
     }
 }
 

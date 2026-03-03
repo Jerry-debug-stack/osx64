@@ -112,7 +112,7 @@ void ahci_kernel_thread(void) {
             }
             spin_unlock(&dev->lock);
         }
-        yield();
+        sys_yield();
     }
 }
 

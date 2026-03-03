@@ -43,12 +43,12 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
     parse_cmd_line(info);
     init_acpi_madt();
     init_apic_bsp();
-    color_print("[SYSTEM ] apic ready\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    wb_printf("[SYSTEM ] apic ready\n");
     init_protect(1);
     init_task();
     init_time();
     init_keyboard();
-    color_print("[SYSTEM ] task ready\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    wb_printf("[SYSTEM ] task ready\n");
     multi_core_start = true;
     init_ap();
     cpu_task_start();
@@ -62,16 +62,16 @@ void pty_init(void);
 void put_tty_thread(void);
 
 void init(void){
-    color_print("[SYSTEM ] enter init progress!\n",VIEW_COLOR_BLACK,VIEW_COLOR_WHITE);
+    wb_printf("[SYSTEM ] enter init progress!\n");
     
     init_fs_mem();
     enumerate_pcie_devices();
-    kernel_thread_link_init("ahci",ahci_kernel_thread);
+    kernel_thread_link_init("ahci",ahci_kernel_thread,NULL);
     read_partitions();
     mount_root();
     pty_init();
     
-    kernel_thread_link_init("display",display_server);
+    kernel_thread_link_init("display",display_server,NULL);
 
     while (1)
     {

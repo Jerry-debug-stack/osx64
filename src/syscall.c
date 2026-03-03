@@ -25,6 +25,10 @@ int sys_mount(const char *dev_path,const char *to_path);
 int sys_umount(const char *target_path);
 int sys_reload_partition(char *target);
 int sys_getdent(int fd, struct dirent __user *dirp, unsigned int count);
+_Noreturn void sys_exit(int exit_status);
+void sys_yield(void);
+int sys_waitpid(int pid, int *status);
+int sys_sync(void);
 
 void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_get_ticks,
@@ -46,5 +50,9 @@ void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_mount,
     sys_umount,
     sys_reload_partition,
-    sys_getdent
+    sys_getdent,
+    sys_exit,
+    sys_yield,
+    sys_waitpid,
+    sys_sync,
 };

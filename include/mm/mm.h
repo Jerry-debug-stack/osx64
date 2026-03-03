@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type);
+void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type);
 int exist_page_4k(uint64_t vir_addr, uint64_t ptable_vir);
 void rm_page_4k(uint64_t vir_addr, uint64_t ptable_vir);
 void put_page_2M(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir);

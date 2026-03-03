@@ -36,7 +36,7 @@ char rootuuid[37] = "?";
 void init_fs_mem(void){
     init_block();
     init_vfs_mgr();
-    kernel_thread_link_init("fs_cache",dentry_cache_task);
+    kernel_thread_link_init("fs_cache",dentry_cache_task,NULL);
 }
 
 static inline void init_vfs_mgr(void){
@@ -959,7 +959,7 @@ static void dentry_cache_task(void)
         spin_lock(&vfs_mgr.dentry_cache_list.lock);
         if (atomic_read(&vfs_mgr.dentry_cache_num) <= DENTRY_CACHE_SIZE) {
             spin_unlock(&vfs_mgr.dentry_cache_list.lock);
-            yield();
+            sys_yield();
             continue;
         }
         dentry = list_first_entry(&vfs_mgr.dentry_cache_list.list, dentry_t, cache_list_item);
@@ -1206,17 +1206,20 @@ off_t sys_lseek(int fd, off_t offset, int whence)
         new_pos = inode->size + offset;
         break;
     default:
-        return -1;
+        goto failed;   
     }
 
     // 检查新位置是否有效（不能为负）
     if (new_pos < 0)
-        return -1;
+        goto failed;
 
     // 更新文件位置
     file->pos = new_pos;
     mutex_unlock(&file->lock);
     return new_pos;
+failed:
+    mutex_unlock(&file->lock);
+    return -1;
 }
 
 int sys_mkdir(const char *path, int mode)
@@ -1941,4 +1944,19 @@ int sys_getdent(int fd, struct dirent __user *dirp, unsigned int count)
     mutex_unlock(&file->lock);
     read_unlock(&vfs_mgr.namespace_lock);
     return ret;
+}
+
+int sys_sync(void){
+    write_lock(&vfs_mgr.mount_lock);
+    write_lock(&vfs_mgr.namespace_lock);
+    list_head_t *pos;
+    list_for_each(pos,&vfs_mgr.mount_list.list){
+        super_block_t *sb = container_of(pos,super_block_t,mount_list);
+        if (sb->super_ops && sb->super_ops->sync_fs){
+            sb->super_ops->sync_fs(sb);
+        }
+    }
+    write_unlock(&vfs_mgr.namespace_lock);
+    write_unlock(&vfs_mgr.mount_lock);
+    return 0;
 }

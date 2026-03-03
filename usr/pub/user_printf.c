@@ -1,41 +1,14 @@
-#include "mm/mm.h"
-#include "view/view.h"
-#include <stdarg.h>
-#include <stdbool.h>
-#include "fs/fs.h"
+#include "usr/usr_const.h"
+#include "usr/sysapi.h"
+#include "lib/string.h"
+#include "usr/usr_mem.h"
 
-extern bool tty_ready;
+#include <stdarg.h> // 可变参数支持
+
+const char numString[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+const char numStringUpper[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 static uint32_t vsnprintf(char* buf, uint32_t size, const char* fmt, va_list args);
-
-uint32_t color_printf(const char* fmt, uint32_t color_back, uint32_t color_fore, ...)
-{
-    char buf[1024];
-    va_list args;
-    va_start(args, color_fore);
-    uint32_t written = vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    if (tty_ready){
-        sys_write(1,buf,written);
-    }else{
-        color_print(buf, color_back, color_fore);
-    }
-    return written;
-}
-
-uint32_t wb_printf(const char* fmt,...){
-    char buf[1024];
-    va_list args;
-    va_start(args, fmt);
-    uint32_t written = vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    if (tty_ready){
-        sys_write(1,buf,written);
-    }else{
-        color_print(buf, VIEW_COLOR_BLACK, VIEW_COLOR_WHITE);
-    }
-    return written;
-}
 
 uint32_t sprintf(char* buf,const char* fmt,uint32_t size,...){
     va_list args;
@@ -228,4 +201,14 @@ static uint32_t vsnprintf(char* buf, uint32_t size, const char* fmt, va_list arg
     }
     buf[pos] = '\0';
     return pos;
+}
+
+uint32_t printf(const char* fmt,...){
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    uint32_t written = vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    write(1,buf,written);
+    return written;
 }
