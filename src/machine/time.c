@@ -4,30 +4,38 @@
 #include "machine/cpu.h"
 #include "mm/mm.h"
 
-#define RELOAD_TICKS (1193182 / 1000)
+#define RELOAD_TICKS (1193182 / CLOCK_FREQ)
 
 extern GLOBAL_CPU *cpus;
 
 extern void set_handler(uint64_t irq, uint64_t addr);
 extern void set_EOI(void);
-extern void disable_irq(uint64_t irq);
-extern void enable_irq(uint64_t irq);
+extern void disable_irq(uint16_t irq);
+extern void enable_irq(uint16_t irq);
 extern uint32_t get_logic_cpu_id(void);
-extern void schedule();
+extern void schedule(void);
+extern int init_hpet_timer(void);
 
 uint64_t ticks;
+extern uint64_t hpet_base;
 
 void timer_intr_soft(void);
 static inline uint32_t local_timer_timeout(CPU_ITEM *cpu);
 static void add_timer(enum timer_type_enum timer_type,uint64_t first_ticks,uint32_t delta_ticks,pcb_t *task,uint32_t signal);
 static void load_balance(uint32_t id);
+static void init_8254(void);
 
 void init_time(void)
 {
     ticks = 0;
-    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x43), "al"(0x34) :);
-    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x40), "al"((RELOAD_TICKS) & 0xFF) :);
-    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x40), "al"((RELOAD_TICKS) >> 8) :);
+    if (hpet_base){
+        if (init_hpet_timer()){
+            init_8254();
+        }
+    else{
+        init_8254();
+    }}
+
     for (uint32_t i = 0; i < cpus->total_num; i++)
     {
         CPU_ITEM* cpu = &cpus->items[i];
@@ -40,6 +48,11 @@ void init_time(void)
     enable_irq(2);
 }
 
+static void init_8254(void){
+    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x43), "al"(0x34) :);
+    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x40), "al"((RELOAD_TICKS) & 0xFF) :);
+    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x40), "al"((RELOAD_TICKS) >> 8) :);
+}
 
 void timer_intr_soft(void){
     /* 进入时关着中断 */

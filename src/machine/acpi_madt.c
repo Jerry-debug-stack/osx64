@@ -37,6 +37,18 @@ struct acpi_sdt_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
+struct acpi_hpet {
+    struct acpi_sdt_header header;
+    uint32_t event_timer_block_id;
+    uint8_t  base_address_scale;
+    uint8_t  reserved;
+    uint16_t vendor_id;
+    uint64_t base_address;
+    uint8_t  hpet_number;
+    uint16_t minimum_tick;
+    uint8_t  page_protection;
+} __attribute__((packed));
+
 struct madt {
     struct acpi_sdt_header header;
     uint32_t local_controller_addr;
@@ -124,6 +136,35 @@ static struct madt *find_madt(void) {
     return NULL;
 }
 
+extern uint64_t hpet_base;
+// 查找HPET表
+static void init_hpet_from_acpi(void) {
+    if (!rsdp) return;
+
+    struct acpi_sdt_header *rsdt = easy_phy2linear(rsdp->rsdt_address);
+    if (!validate_checksum(rsdt, rsdt->length)) return;
+
+    uint32_t entry_count = (rsdt->length - sizeof(struct acpi_sdt_header)) / 4;
+    uint32_t *entries = (uint32_t *)((uintptr_t)rsdt + sizeof(struct acpi_sdt_header));
+
+    for (uint32_t i = 0; i < entry_count; i++) {
+        struct acpi_sdt_header *header = easy_phy2linear(entries[i]);
+        if (header->signature[0] == 'H' && header->signature[1] == 'P' &&
+            header->signature[2] == 'E' && header->signature[3] == 'T') {
+            
+            if (!validate_checksum(header, header->length)) continue;
+
+            struct acpi_hpet *hpet_table = (struct acpi_hpet *)header;
+            // base_address字段是物理地址，需要转换为线性地址供后续访问
+            hpet_base = (uint64_t)easy_phy2linear(hpet_table->base_address);
+            
+            wb_printf("[  HPET ] Found HPET table, base linear address: %#lx\n", hpet_base);
+            return;
+        }
+    }
+    wb_printf("[  HPET ] No HPET table found, fallback to 8254\n");
+}
+
 // 通过MADT统计处理器
 static void alloc_logic_cpu_id(void) {
     // 遍历MADT中的条目
@@ -158,7 +199,7 @@ uint32_t get_logic_cpu_id(void){
         if(cpus->physic_apic_id[i] == apic_id)
             return i;
     }
-    wb_printf("[ PANIC ] Logic cpu id get failed!!!");
+    // wb_printf("[ PANIC ] Logic cpu id get failed!!!");
     halt();
 }
 
@@ -183,4 +224,5 @@ void init_acpi_madt(void){
         wb_printf("[  CPU  ] alloc logic id %d for cpu apic %#x\n",i,cpus->physic_apic_id[i]);
     }
     wb_printf("[  CPU  ] %d CPUs in total\n",cpus->total_num);
+    init_hpet_from_acpi();
 }

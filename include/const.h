@@ -2,6 +2,8 @@
 #define OS_CONST_H
 #include <stdint.h>
 
+#define CLOCK_FREQ      5000
+
 #define VIRTUAL_ADDR_0 0xffff800000000000
 #define PHYSIC_ADDR_AP_CODE_DATA       0x10000
 
