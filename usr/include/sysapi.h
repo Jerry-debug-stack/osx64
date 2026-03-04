@@ -16,7 +16,12 @@ typedef struct dirent {
     char     d_name[];   // 文件名
 } dirent_t;
 
-uint32_t get_ticks(void);
+typedef struct utimespec {
+    uint64_t tv_sec;  // 秒
+    uint64_t   tv_nsec; // 纳秒
+} utimespec_t;
+
+uint32_t time(void);
 int open(const char *path, int flags, int mode);
 ssize_t read(int fd, char *buf, size_t count);
 ssize_t write(int fd, const char *buf, size_t count);
@@ -43,5 +48,6 @@ int sync(void);
 int fork(void);
 int execv(const char* path, char* const argv[]);
 int reboot(int cmd);
+void clock_gettime(utimespec_t *u);
 
 #endif

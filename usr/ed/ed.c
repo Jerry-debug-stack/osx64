@@ -3,7 +3,7 @@
 
 #include "uconst.h"
 #include "mem.h"
-#include "printf.h"
+#include "uprintf.h"
 #include "ustring.h"
 #include "sysapi.h"
 

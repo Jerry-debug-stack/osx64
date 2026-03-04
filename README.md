@@ -94,7 +94,18 @@
 - [x] 终端与伪终端
     - [x] 单个tty的键盘输入
     - [x] 多tty
-- [ ] HPET CMOS
+- [ ] advanced Hardware
+    - [x] FPU
+        - [x] x87
+        - [x] MMX
+        - [x] SSE 
+        - [x] lazy save and load
+    - [x] HPET
+        - [x] detect
+        - [x] timer of 5000Hz
+        - [ ] higher timing frequency stability
+    - [x] CMOS time
+    - [x] time syscall
 - [ ] USB
 
 

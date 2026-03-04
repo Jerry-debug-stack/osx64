@@ -1,4 +1,4 @@
-global get_ticks
+global time
 global open
 global read
 global write
@@ -25,10 +25,11 @@ global sync
 global fork
 global execv
 global reboot
+global clock_gettime
 
 section .text
     bits 64
-    get_ticks:
+    time:
         mov rax,0
         int 0x80
         ret
@@ -160,5 +161,10 @@ section .text
 
     reboot:
         mov rax,26
+        int 0x80
+        ret
+
+    clock_gettime:
+        mov rax,27
         int 0x80
         ret

@@ -120,6 +120,7 @@ static pcb_t *put_thread(char *name, void *addr, pcb_t *parent,bool is_ker,void 
     new_task->magic = TASK_MAGIC;
     new_task->signal = 0;
     new_task->state = TASK_STATE_READY;
+    new_task->ticks = DEFUALT_TICKS;
     /* start up 栈空间 */
     registers_t *reg = (void *)((uint64_t)new_task + DEFAULT_PCB_SIZE - sizeof(registers_t));
     task_start_t *task_start = (void *)((uint64_t)new_task + DEFAULT_PCB_SIZE - (sizeof(registers_t) + sizeof(task_start_t)));

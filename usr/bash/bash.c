@@ -1,7 +1,7 @@
 #include "sysapi.h"
 #include "uconst.h"
 #include "mem.h"
-#include "printf.h"
+#include "uprintf.h"
 #include "ustring.h"
 
 #define MAX_ARGS 32

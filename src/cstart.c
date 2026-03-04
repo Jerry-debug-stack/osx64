@@ -21,6 +21,7 @@ void init_fs_mem(void);
 void enumerate_pcie_devices(void);
 void read_partitions(void);
 void init_fpu_sse(void);
+void real_time_init(void);
 
 _Noreturn void cpu_task_start(void);
 
@@ -54,6 +55,7 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
     init_fpu_sse();
     multi_core_start = true;
     init_ap();
+    real_time_init();
     cpu_task_start();
 }
 

@@ -98,4 +98,41 @@ static inline int atomic_test_and_set_bit(int nr, volatile void *addr)
     return old;
 }
 
+// 原子64位整数类型
+typedef struct {
+    volatile uint64_t counter;
+} atomic_64_t;
+
+// 初始化宏
+#define ATOMIC_64_INIT(i) { (i) }
+
+static inline void atomic_64_set(atomic_64_t *v, uint64_t i) {
+    __sync_synchronize();
+    v->counter = i;
+    __sync_synchronize();
+}
+
+static inline uint64_t atomic_64_read(const atomic_64_t *v) {
+    __sync_synchronize();
+    uint64_t val = v->counter;
+    __sync_synchronize();
+    return val;
+}
+
+static inline void atomic_64_inc(atomic_64_t *v) {
+    __sync_fetch_and_add(&v->counter, 1);
+}
+
+static inline void atomic_64_dec(atomic_64_t *v) {
+    __sync_fetch_and_sub(&v->counter, 1);
+}
+
+static inline void atomic_64_add(atomic_64_t *v, uint64_t i) {
+    __sync_fetch_and_add(&v->counter, i);
+}
+
+static inline void atomic_64_sub(atomic_64_t *v, uint64_t i) {
+    __sync_fetch_and_sub(&v->counter, i);
+}
+
 #endif

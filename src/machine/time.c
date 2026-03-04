@@ -3,6 +3,7 @@
 #include "lib/timer.h"
 #include "machine/cpu.h"
 #include "mm/mm.h"
+#include "lib/atomic.h"
 
 #define RELOAD_TICKS (1193182 / CLOCK_FREQ)
 
@@ -16,7 +17,8 @@ extern uint32_t get_logic_cpu_id(void);
 extern void schedule(void);
 extern int init_hpet_timer(void);
 
-uint64_t ticks;
+static uint64_t ticks;
+extern atomic_64_t unix_time;
 extern uint64_t hpet_base;
 
 void timer_intr_soft(void);
@@ -59,11 +61,12 @@ void timer_intr_soft(void){
     uint32_t id = get_logic_cpu_id();
     CPU_ITEM *cpu = &cpus->items[id];
     set_EOI();
+    pcb_t *current = cpu->now_running;
+    current->ticks--;
     if (cpu->time_intr_reenter){
         return;
     }
     cpu->time_intr_reenter++;
-    pcb_t *current = cpu->now_running;
     if (current->preempt_count > 0){
         cpu->time_intr_reenter--;
         return;
@@ -71,7 +74,7 @@ void timer_intr_soft(void){
     {
         current->preempt_count = 0;
     }
-    
+
     /* 调度请求标志 */
     bool need_schedule = true;
     /* step 1 处理本地时钟 */ 
@@ -81,6 +84,8 @@ void timer_intr_soft(void){
         load_balance(id);
     }
     /* step 3 考虑是否需要调度 */
+    if (current->ticks > 0)
+        need_schedule = false;
     /* 这里保留作以后处理 */
     __asm__ __volatile__("sti");
     /* 下半段 */
@@ -88,6 +93,7 @@ void timer_intr_soft(void){
     /* 结束段 */
     cpu->time_intr_reenter--;
     if (need_schedule){
+        current->ticks = DEFUALT_TICKS;
         if (current != cpu->idle){
             current->state = TASK_STATE_READY;
             spin_lock(&cpu->ready_list.lock);
@@ -102,8 +108,14 @@ void timer_intr_soft(void){
 
 }
 
+static uint64_t j = 0;
 void timer_intr_soft_bsp(void){
     ticks++;
+    j++;
+    if (j == CLOCK_FREQ){
+        j = 0;
+        atomic_64_inc(&unix_time);
+    }
     timer_intr_soft();
 }
 
@@ -287,4 +299,20 @@ static void load_balance(uint32_t id){
     }else if (now_load == min_load){
         tasks_travel(busiest_cpu,id);
     }
+}
+
+uint64_t sys_time(void){
+    return atomic_64_read(&unix_time);
+}
+
+typedef struct utimespec {
+    uint64_t tv_sec;  // 秒
+    uint64_t   tv_nsec; // 纳秒
+} utimespec_t;
+
+void sys_clock_gettime(void *addr){
+    utimespec_t time;
+    time.tv_sec = atomic_64_read(&unix_time);
+    time.tv_nsec = j * (1000000000UL / CLOCK_FREQ);
+    copy_to_user(addr,&time,sizeof(utimespec_t));
 }

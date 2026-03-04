@@ -34,6 +34,7 @@ typedef struct pcb
     int pid;
     bool is_ker;
     uint64_t cr3;
+    int ticks;
     uint32_t cpuid;
     list_head_t all_list;
     /* parent relationship */

@@ -2,10 +2,7 @@
 #include <stdint.h>
 #include "fs/fs.h"
 
-extern uint64_t ticks;
-uint64_t sys_get_ticks(void){
-    return ticks;
-}
+uint64_t sys_time(void);
 int sys_open(const char *path, int flags, int mode);
 ssize_t sys_read(int fd, char *buf, size_t count);
 ssize_t sys_write(int fd, const char *buf, size_t count);
@@ -31,9 +28,10 @@ int sys_waitpid(int pid, int *status);
 int sys_sync(void);
 int sys_execv(const char* path, char* const argv[]);
 int sys_reboot(int cmd);
+void sys_clock_gettime(void *addr);
 
 void *syscall_table[MAX_SYSCALL_NUM] = {
-    sys_get_ticks,
+    sys_time,
     sys_open,
     sys_read,
     sys_write,
@@ -59,5 +57,6 @@ void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_sync,
     NULL, /* fork */
     sys_execv,
-    sys_reboot
+    sys_reboot,
+    sys_clock_gettime,
 };
