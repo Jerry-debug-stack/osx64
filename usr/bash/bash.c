@@ -1,8 +1,8 @@
-#include "usr/sysapi.h"
-#include "usr/usr_const.h"
-#include "usr/usr_mem.h"
-#include "usr/usr_printf.h"
-#include "usr/usr_string.h"
+#include "sysapi.h"
+#include "uconst.h"
+#include "mem.h"
+#include "printf.h"
+#include "ustring.h"
 
 #define MAX_ARGS 32
 #define MAX_INPUT_LENGTH 1024

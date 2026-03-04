@@ -1,11 +1,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "usr/usr_const.h"
-#include "usr/usr_mem.h"
-#include "usr/usr_printf.h"
-#include "usr/usr_string.h"
-#include "usr/sysapi.h"
+#include "uconst.h"
+#include "mem.h"
+#include "printf.h"
+#include "ustring.h"
+#include "sysapi.h"
 
 int main(void){
     int seconds = get_ticks();

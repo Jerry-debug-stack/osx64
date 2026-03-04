@@ -49,13 +49,20 @@ typedef struct pcb
     /* 定时器 */
     spin_list_head_t timers;
     uint32_t signal;
-    uint32_t magic;
     /* 文件系统 */
     struct file *files[NR_OPEN_DEFAULT];
     struct dentry *cwd;
     
     enum task_state state;
     int exit_status;
+    
+    struct {
+        bool used_fpu;
+        uint8_t fpu_save_area[512] __attribute__((aligned(16)));
+        bool fpu_dirty;
+    } fpu;
+    
+    uint32_t magic;
 } pcb_t;
 
 /// @brief 保存上下文信息

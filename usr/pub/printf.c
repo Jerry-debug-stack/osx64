@@ -1,7 +1,8 @@
-#include "usr/usr_const.h"
-#include "usr/sysapi.h"
-#include "lib/string.h"
-#include "usr/usr_mem.h"
+#include "uconst.h"
+#include "sysapi.h"
+#include "ustring.h"
+#include "mem.h"
+#include "math.h"
 
 #include <stdarg.h> // 可变参数支持
 
@@ -59,6 +60,77 @@ static uint32_t vsnprintf(char* buf, uint32_t size, const char* fmt, va_list arg
                 char_upper = 0;
                 with_header = 1;
                 goto parse_hex;
+            } else if (fmt[i] == 'f') {
+                double d = va_arg(args, double);
+                int precision = 6;  // 默认精度，以后可从格式中解析
+                char buf_int[32], buf_frac[32];
+                uint64_t int_part, frac_part;
+                int negative = 0;
+
+                // 处理 NaN 和 Inf
+                if (isnan(d)) {
+                    const char *nan_str = "nan";
+                    for (int j = 0; nan_str[j] && pos < size - 1; j++)
+                        buf[pos++] = nan_str[j];
+                    i++;
+                    continue;
+                }
+                if (isinf(d)) {
+                    const char *inf_str = (d > 0) ? "inf" : "-inf";
+                    for (int j = 0; inf_str[j] && pos < size - 1; j++)
+                        buf[pos++] = inf_str[j];
+                    i++;
+                    continue;
+                }
+
+                if (d < 0) {
+                    negative = 1;
+                    d = -d;
+                }
+
+                // 拆分整数和小数
+                double int_d, frac_d;
+                frac_d = modf(d, &int_d);
+
+                int_part = (uint64_t)int_d;
+
+                // 计算小数部分并四舍五入
+                double multiplier = 1.0;
+                for (int j = 0; j < precision; j++) multiplier *= 10.0;
+                frac_part = (uint64_t)(frac_d * multiplier + 0.5);  // 简单的四舍五入
+
+                // 处理进位
+                if (frac_part >= (uint64_t)multiplier) {
+                    int_part++;
+                    frac_part -= (uint64_t)multiplier;
+                }
+
+                // 转换整数部分
+                char *p_int = buf_int + sizeof(buf_int) - 1;
+                *p_int = '\0';
+                uint64_t tmp = int_part;
+                do {
+                    *--p_int = (tmp % 10) + '0';
+                    tmp /= 10;
+                } while (tmp > 0);
+
+                // 转换小数部分（注意补零）
+                char *p_frac = buf_frac + sizeof(buf_frac) - 1;
+                *p_frac = '\0';
+                for (int j = 0; j < precision; j++) {
+                    *--p_frac = (frac_part % 10) + '0';
+                    frac_part /= 10;
+                }
+                // 如果小数部分不足精度，前面补零已经在循环中实现（因为循环固定次数）
+
+                // 输出
+                if (negative && pos < size-1) buf[pos++] = '-';
+                while (*p_int && pos < size-1) buf[pos++] = *p_int++;
+                if (precision > 0 && pos < size-1) buf[pos++] = '.';
+                while (*p_frac && pos < size-1) buf[pos++] = *p_frac++;
+
+                i++;
+                continue;
             } else if (fmt[i] == '#') {
                 with_header = 1;
                 i++;

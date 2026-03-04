@@ -4,9 +4,12 @@ ld   			= ld
 gcc  			= gcc -o
 objcopy			= objcopy
 
-inc				= include
-gccBuild 		= -m64 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mcmodel=large -mno-red-zone -Wall -Wextra -I$(inc) -c -g
-gccBuild 		+= -mgeneral-regs-only -mno-mmx -mno-sse -mno-sse2 -mno-80387
+kinc			= include
+uinc			= usr/include
+
+k_cflags 		= -m64 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mcmodel=large -mno-red-zone -Wall -Wextra -I$(kinc) -c -g \
+	-mgeneral-regs-only -mno-mmx -mno-sse -mno-sse2  -mno-avx -mno-80387
+u_cflags		= -m64 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mcmodel=large -Wall -Wextra -mno-avx -mmmx -msse -mstackrealign -I$(uinc) -c -g
 
 # 自动收集用户公共库源文件
 PUB_C_SRCS		= $(wildcard usr/pub/*.c)
@@ -15,7 +18,8 @@ PUB_OBJS		= $(patsubst usr/pub/%.c, target/usr/pub/%.o, $(PUB_C_SRCS)) \
 				  $(patsubst usr/pub/%.asm, target/usr/pub/%.o, $(PUB_ASM_SRCS))
 
 # 自动收集用户程序目录（排除 pub）
-USER_SUBDIRS    = $(filter-out usr/pub/, $(wildcard usr/*/))
+EXCLUDE_SUBDIRS = usr/pub/ usr/include/
+USER_SUBDIRS    = $(filter-out $(EXCLUDE_SUBDIRS), $(wildcard usr/*/))
 USER_PROGS		= $(notdir $(patsubst %/, %, $(USER_SUBDIRS)))
 USER_ELFS		= $(addprefix target/, $(addsuffix .elf, $(USER_PROGS)))
 
@@ -36,12 +40,12 @@ $(target): $(target_elf)
 	$(objcopy) -O binary -S $^ $@
 
 target/boot.o: src/boot.asm
-	$(nasm) -f elf64 -g -I$(inc) -o $@ $^
+	$(nasm) -f elf64 -g -I$(kinc) -o $@ $^
 
 # 通用编译规则：处理 usr/ 下所有 .c 和 .asm 文件（包括 pub 和各个程序目录）
 target/usr/%.o: usr/%.c
 	@mkdir -p $(dir $@)
-	$(gcc) $@ $(gccBuild) $^
+	$(gcc) $@ $(u_cflags) $^
 
 target/usr/%.o: usr/%.asm
 	@mkdir -p $(dir $@)
@@ -50,7 +54,7 @@ target/usr/%.o: usr/%.asm
 # 内核 C 文件编译规则
 target/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(gcc) $@ $(gccBuild) $^
+	$(gcc) $@ $(k_cflags) $^
 
 # 为每个用户程序生成链接规则
 define PROGRAM_template

@@ -64,10 +64,14 @@ void timer_intr_soft(void){
     }
     cpu->time_intr_reenter++;
     pcb_t *current = cpu->now_running;
-    if (current->preempt_count){
+    if (current->preempt_count > 0){
         cpu->time_intr_reenter--;
         return;
+    }else if (current->preempt_count < 0 )
+    {
+        current->preempt_count = 0;
     }
+    
     /* 调度请求标志 */
     bool need_schedule = true;
     /* step 1 处理本地时钟 */ 

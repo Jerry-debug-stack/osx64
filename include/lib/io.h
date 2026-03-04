@@ -83,4 +83,31 @@ static inline void io_outdword(uint16_t port, uint32_t dword)
     __asm__ __volatile__("outl %%eax,%%dx;" ::"d"(port), "a"(dword));
 }
 
+static inline void cpuid(uint64_t leaf, uint64_t *rax, uint64_t *rbx, uint64_t *rcx, uint64_t *rdx) {
+    __asm__ volatile ("cpuid"
+        : "=a" (*rax), "=b" (*rbx), "=c" (*rcx), "=d" (*rdx)
+        : "a" (leaf), "c" (0)
+    );
+}
+
+static inline uint64_t read_cr0(void) {
+    uint64_t val;
+    __asm__ volatile ("mov %%cr0, %0" : "=r" (val));
+    return val;
+}
+
+static inline void write_cr0(uint64_t val) {
+    __asm__ volatile ("mov %0, %%cr0" : : "r" (val));
+}
+
+static inline uint64_t read_cr4(void) {
+    uint64_t val;
+    __asm__ volatile ("mov %%cr4, %0" : "=r" (val));
+    return val;
+}
+
+static inline void write_cr4(uint64_t val) {
+    __asm__ volatile ("mov %0, %%cr4" : : "r" (val));
+}
+
 #endif

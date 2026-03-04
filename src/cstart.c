@@ -20,6 +20,7 @@ void init_task(void);
 void init_fs_mem(void);
 void enumerate_pcie_devices(void);
 void read_partitions(void);
+void init_fpu_sse(void);
 
 _Noreturn void cpu_task_start(void);
 
@@ -31,6 +32,7 @@ _Noreturn void ap_start(void){
     init_apic_ap();
     init_protect(0);
     wb_printf("[AP Core] Core %d started!\n",get_logic_cpu_id());
+    init_fpu_sse();
     enable_irq(2);
     cpu_task_start();
 }
@@ -49,6 +51,7 @@ _Noreturn void cstart(MULTIBOOT_INFO* info)
     init_time();
     init_keyboard();
     wb_printf("[SYSTEM ] task ready\n");
+    init_fpu_sse();
     multi_core_start = true;
     init_ap();
     cpu_task_start();

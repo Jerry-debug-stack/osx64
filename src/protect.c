@@ -5,6 +5,8 @@
 #include "string.h"
 #include "view/view.h"
 #include "machine/cpu.h"
+#include "protect.h"
+#include "lib/io.h"
 
 extern GLOBAL_CPU *cpus;
 
@@ -166,9 +168,28 @@ void exception_handler(
         pcb_t *current = get_current();
         if (current->is_ker)
             goto fail;
-        if (interrupt_num == 18 || interrupt_num == 10 || interrupt_num == 8 || interrupt_num == 2)
+        switch (interrupt_num)
+        {
+        case 2:
+        case 8:
+        case 10:
+        case 18:
             goto fail;
-        if (interrupt_num == 14) {
+        case 7:
+            uint64_t cr0 = read_cr0();
+            cr0 &= ~CR0_TS;
+            write_cr0(cr0);
+            if (!current->fpu.used_fpu) {
+                __asm__ volatile ("fninit");
+                uint32_t mxcsr = 0x1F80;
+                __asm__ volatile ("ldmxcsr %0" : : "m" (mxcsr));
+                current->fpu.used_fpu = true;
+            } else {
+                asm volatile ("fxrstor %0" : : "m" (current->fpu.fpu_save_area));
+            }
+            current->fpu.fpu_dirty = true;
+            return;
+        case 14:
             if ((error_no & PAGEFAULT_PRESENT) == 0) {
                 unsigned long vir_page;
                 __asm__ __volatile__("mov %%cr2, %0" : "=r"(vir_page));
@@ -178,9 +199,11 @@ void exception_handler(
                     put_page_4k(phy_page,vir_page,current->cr3,1);
                     __asm__ __volatile__("invlpg (%0);" ::"r"(vir_page) : "memory");
                     return;
-                }
-            }
-        }else if (interrupt_num == 1){ /* 未来的debug? */}
+                }else break;
+            }else break;    
+        default:
+            break;
+        }
         color_printf("[ ERROR ] task named %s exit because of interrupt %d\n[ ERROR ] rip 0x%lx cs 0x%x rflags 0x%lx rsp:0x%lx ss:0x%x\n",
             VIEW_COLOR_RED,VIEW_COLOR_WHITE,
             current->name,interrupt_num,rip,cs,rflags,rsp,ss

@@ -1,6 +1,8 @@
 #include "const.h"
-#include "usr/usr_const.h"
 #include "lib/io.h"
+
+#define REBOOT_CMD_POWER_OFF 0
+#define REBOOT_CMD_RESTART 1
 
 int sys_sync(void);
 

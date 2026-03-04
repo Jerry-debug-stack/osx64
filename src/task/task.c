@@ -65,16 +65,10 @@ static pcb_t *kernel_thread(char *name, void *addr,pcb_t *parent,uint32_t n,void
 extern uint64_t *vir_ptable4;
 
 /**
- * @brief
- * @param name
- * @param addr
- * @param parent
- * @return
  * @note 事实上,在put时只有填入parent=nowrunning(当前进程),
  * 才是合法的,否则存在内存不安全问题,
  * parent不是自己,则可能随时退出,进而可能访问无效内存(new_task->parent)
  * parent选项的存在是为了可能的疑难问题
- * @todo 加上对args的support
  */
 static pcb_t *put_thread(char *name, void *addr, pcb_t *parent,bool is_ker,void *arg)
 {
@@ -89,6 +83,8 @@ static pcb_t *put_thread(char *name, void *addr, pcb_t *parent,bool is_ker,void 
     new_task->cr3 = (uint64_t)vir_ptable4;
     new_task->cpuid = 0;
     new_task->preempt_count = 0;
+    new_task->fpu.used_fpu = false;
+    new_task->fpu.fpu_dirty = false;
     /* pid */
     alloc_pid_and_add_to_all_list(new_task);
     /* parent */
@@ -195,6 +191,17 @@ static inline void switch_cr3_if_needed(pcb_t *will_run)
     );
 }
 
+static void handle_fpu_sse(pcb_t *prev){
+    if (prev->fpu.fpu_dirty) {
+        // 保存当前 FPU 状态到 prev 的 PCB
+        asm volatile ("fxsave %0" : : "m" (prev->fpu.fpu_save_area));
+        prev->fpu.fpu_dirty = false;            // 清除脏标志
+    }
+    uint64_t cr0 = read_cr0();
+    cr0 |= CR0_TS;
+    write_cr0(cr0);
+}
+
 void __schedule_locked(uint8_t intr){
     uint32_t id = get_logic_cpu_id();
     CPU_ITEM *item = &cpus->items[id];
@@ -207,6 +214,8 @@ void __schedule_locked(uint8_t intr){
     }else{
         will_run = item->idle;
     }
+    if (before_run != will_run)
+        handle_fpu_sse(before_run);
     switch_cr3_if_needed(will_run);
     will_run->cpuid = id;
     item->now_running = will_run;
@@ -230,6 +239,8 @@ void __schedule_other_locked(spinlock_t *wq_lock){
     }else{
         will_run = item->idle;
     }
+    if (before_run != will_run)
+        handle_fpu_sse(before_run);
     switch_cr3_if_needed(will_run);
     will_run->cpuid = id;
     item->now_running = will_run;
@@ -456,6 +467,12 @@ int sys_execv(const char* path, char* const argv[])
     }
     __asm__ __volatile__("cli");
     current->is_ker = false;
+
+    current->fpu.used_fpu = false;
+    current->fpu.fpu_dirty = false;
+    uint64_t cr0 = read_cr0();
+    cr0 |= CR0_TS;
+    write_cr0(cr0);
     
     asm_execv_out(
         (uint64_t)current + DEFAULT_PCB_SIZE - sizeof(registers_t),
@@ -490,6 +507,14 @@ int fork_enter(unsigned long rsp)
             atomic_inc(&current->files[i]->refcount);
         }
     }
+
+    if (current->fpu.used_fpu){
+        if (current->fpu.fpu_dirty){
+            asm volatile ("fxsave %0" : : "m" (current->fpu.fpu_save_area));
+        }
+        memcpy(child->fpu.fpu_save_area,current->fpu.fpu_save_area,512);
+    }
+    child->fpu.used_fpu = current->fpu.used_fpu;
 
     memcpy((void *)((uint64_t)child + sizeof(pcb_t)),(void *)((uint64_t)current + sizeof(pcb_t)),DEFAULT_PCB_SIZE - sizeof(pcb_t));    
     child->rsp = rsp - sizeof(task_start_t) - (uint64_t)current + (uint64_t)child;

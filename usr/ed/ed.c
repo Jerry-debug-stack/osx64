@@ -1,11 +1,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "usr/usr_const.h"
-#include "usr/usr_mem.h"
-#include "usr/usr_printf.h"
-#include "usr/usr_string.h"
-#include "usr/sysapi.h"
+#include "uconst.h"
+#include "mem.h"
+#include "printf.h"
+#include "ustring.h"
+#include "sysapi.h"
 
 // 行结构
 typedef struct line {
