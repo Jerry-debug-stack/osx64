@@ -359,6 +359,10 @@ static void free_task(pcb_t *task){
     {
         fd_close(task,i);
     }
+    // close cwd
+    sb_put(task->cwd->in_mnt);
+    dentry_put(task->cwd);
+
     kfree(task);
 }
 

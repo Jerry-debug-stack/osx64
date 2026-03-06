@@ -66,6 +66,11 @@ int elf_file_copy(int fd, elf64_header_t* header, uint64_t cr3)
             }
             sys_lseek(fd,p_header_tbl[i].part_offset,SEEK_SET);
             sys_read(fd,(void*)p_header_tbl[i].part_vaddr,p_header_tbl[i].part_file_size);
+            // 如果 p_memsz > p_filesz，剩余部分清零（即 BSS）
+            if (p_header_tbl[i].part_mem_size > p_header_tbl[i].part_file_size) {
+                memset((void*)(p_header_tbl[i].part_vaddr + p_header_tbl[i].part_file_size), 0,
+                       p_header_tbl[i].part_mem_size - p_header_tbl[i].part_file_size);
+            }
         }
     }
     return 0;

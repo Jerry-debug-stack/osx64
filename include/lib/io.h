@@ -2,6 +2,7 @@
 #define OS_IO_H
 
 #include <stdint.h>
+#include "const.h"
 
 static inline uint32_t atomic_compare_exchange(uint32_t* dest, uint32_t expected, uint32_t new_value)
 {
@@ -81,6 +82,11 @@ static inline uint32_t io_indword(uint16_t port)
 static inline void io_outdword(uint16_t port, uint32_t dword)
 {
     __asm__ __volatile__("outl %%eax,%%dx;" ::"d"(port), "a"(dword));
+}
+
+static inline void io_delay(void) {
+    // 读一个无用端口
+    UNUSED volatile uint8_t a = io_inbyte(0x80);
 }
 
 static inline void cpuid(uint64_t leaf, uint64_t *rax, uint64_t *rbx, uint64_t *rcx, uint64_t *rdx) {

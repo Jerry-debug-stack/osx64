@@ -122,7 +122,7 @@ uint64_t alloc_page_4k(void)
 }
 
 /// @return 正常的话返回获取到的地址，没有找到就返回0
-uint64_t alloc_n_pages_4k(uint32_t n)
+static uint64_t __alloc_n_pages_4k_locked(uint32_t n)
 {
     if (n == 0)
         return 0;
@@ -157,15 +157,24 @@ uint64_t alloc_n_pages_4k(uint32_t n)
     return 0;
 }
 
-void decrease_reference_pages_4k(uint32_t n, uint64_t addr)
+uint64_t alloc_n_pages_4k(uint32_t n){
+    spin_lock(&mm.lock);
+    uint64_t phy_addr = __alloc_n_pages_4k_locked(n);
+    spin_unlock(&mm.lock);
+    return phy_addr;
+}
+
+void free_n_pages_4k(uint32_t n, uint64_t addr)
 {
     if (addr & 0xfff) {
         halt();
     }
     if (n == 0)
         return;
+    spin_lock(&mm.lock);
     for (uint32_t i = 0; i < n; i++)
         decrease_reference_page_4k(addr + (i << 12));
+    spin_unlock(&mm.lock);
 }
 
 uint8_t decrease_reference_page_4k(uint64_t addr)

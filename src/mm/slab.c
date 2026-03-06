@@ -247,7 +247,7 @@ void kfree(void *vir_addr)
     spin_unlock(&mm.lock);
 }
 
-uint64_t mem_linear2phy(uint64_t addr, uint64_t cr3)
+uint64_t mem_linear2phy_get(uint64_t addr, uint64_t cr3)
 {
     if ((addr < SLAB_START_32) && (addr >= VIRTUAL_ADDR_0))
     {
@@ -267,16 +267,20 @@ uint64_t mem_linear2phy(uint64_t addr, uint64_t cr3)
         level4 = (addr >> TABLE_LEVEL_4_BITS) & 0x1FF;
         ptable = (uint64_t *)cr3;
         if ((ptable[level1] & PAGE_PRESENT) == 0)
-            return 0;
+            goto reget;
         ptable = easy_phy2linear(ptable[level1] & 0xFFFFFFFFFFFFFE00);
         if ((ptable[level2] & PAGE_PRESENT) == 0 || (ptable[level2] & PAGE_BIG_ENTRY))
-            return 0;
+            goto reget;
         ptable = easy_phy2linear(ptable[level2] & 0xFFFFFFFFFFFFFE00);
         if ((ptable[level3] & PAGE_PRESENT) == 0 || (ptable[level3] & PAGE_BIG_ENTRY))
-            return 0;
+            goto reget;
         ptable = easy_phy2linear(ptable[level3] & 0xFFFFFFFFFFFFFE00);
         if ((ptable[level4] & PAGE_PRESENT) == 0)
-            return 0;
+            goto reget;
         return (ptable[level4] & 0xFFFFFFFFFFFFF000) + offset;
+    reget:
+        uint64_t phy = (uint64_t)easy_linear2phy(kmalloc(4096));
+        put_page_4k(phy,addr & 0xFFFFFFFFFFFFF000,cr3,1);
+        return phy;
     }
 }

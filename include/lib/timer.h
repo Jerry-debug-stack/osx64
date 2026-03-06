@@ -4,6 +4,7 @@
 #include "lib/my_list.h"
 #include <stdint.h>
 #include "task.h"
+#include "lib/atomic.h"
 
 enum timer_type_enum{
     TIMER_TASK_SING,
@@ -26,5 +27,11 @@ typedef struct timer
 } timer_t;
 
 // local_timer_timeout的返回取值约定：位标志
+void mdelay(uint64_t ms);
+
+extern atomic_64_t unix_time;
+static inline uint64_t get_time(void){
+    return atomic_64_read(&unix_time);
+}
 
 #endif

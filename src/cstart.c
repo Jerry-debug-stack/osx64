@@ -64,14 +64,20 @@ void display_server(UNUSED void *arg);
 
 void mount_root(void);
 void pty_init(void);
-void put_tty_thread(void);
+void uhci_kernel_thread(void);
+void uhci_initial_scan(void);
 
 void init(void){
     wb_printf("[SYSTEM ] enter init progress!\n");
     
     init_fs_mem();
     enumerate_pcie_devices();
+
     kernel_thread_link_init("ahci",ahci_kernel_thread,NULL);
+    kernel_thread_link_init("uhci",uhci_kernel_thread,NULL);
+    
+    uhci_initial_scan();
+
     read_partitions();
     mount_root();
     pty_init();

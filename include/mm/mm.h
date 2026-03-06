@@ -16,6 +16,9 @@ uint64_t alloc_page_4k(void);
 uint8_t decrease_reference_page_4k(uint64_t addr);
 uint8_t add_reference_page_4k(uint64_t addr);
 
+uint64_t alloc_n_pages_4k(uint32_t n);
+void free_n_pages_4k(uint32_t n, uint64_t addr);
+
 void* kmalloc(uint32_t size);
 void kfree(void* vir_addr);
 

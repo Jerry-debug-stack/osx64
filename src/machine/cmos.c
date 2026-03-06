@@ -3,11 +3,6 @@
 #include "lib/atomic.h"
 #include "const.h"
 
-static void io_delay(void) {
-    // 读一个无用端口
-    UNUSED volatile uint8_t a = io_inbyte(0x80);
-}
-
 static uint8_t cmos_read_register(uint8_t reg) {
     io_outbyte(0x70, 0x80 | reg);
     io_delay();

@@ -5,6 +5,9 @@
 #include "const.h"
 #include "lib/string.h"
 #include "view/view.h"
+#include "lib/timer.h"
+
+#define NOATIME
 
 static int ext2_create(struct inode *dir, struct dentry *dentry, int mode);
 static int ext2_delete(struct inode *dir);
@@ -29,9 +32,9 @@ static void ext2_put_super(struct super_block *sb);
 
 /* tool functions */
 static inline void ext2_set_block_all_zero(super_block_t *sb,uint32_t new_block,uint32_t block_size);
-static void ext2_free_ind_blocks(struct super_block *sb, uint32_t block, int level);
+static void ext2_free_ind_blocks(struct super_block *sb, uint32_t block, int level, ext2_inode_t *ei);
 static int ext2_truncate_blocks(struct inode *inode, loff_t new_size);
-static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block);
+static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block,bool *dirty);
 static int ext2_write_inode(struct super_block *sb, uint32_t ino, struct ext2_inode *ei);
 static inline uint16_t EXT2_DIR_REC_LEN(uint16_t name_len);
 static int ext2_dir_add_entry(struct inode *dir, const char *name, uint32_t ino, uint8_t file_type);
@@ -240,8 +243,7 @@ static int ext2_create(struct inode *dir, struct dentry *dentry, int mode)
     ei.i_uid = 0; // 简化，可设为当前用户
     ei.i_gid = 0;
     ei.i_size = 0;
-    ei.i_atime = ei.i_ctime = ei.i_mtime = 0;
-    /// @todo get_seconds(); // 需要时间函数
+    ei.i_atime = ei.i_ctime = ei.i_mtime = (uint32_t)get_time();
     ei.i_links_count = 1; // 新建文件链接数为1
     ei.i_blocks = 0; // 尚未分配块
     ei.i_flags = 0;
@@ -272,11 +274,9 @@ static int ext2_create(struct inode *dir, struct dentry *dentry, int mode)
     // 关联到dentry
     dentry->inode = inode;
 
-    // 更新父目录的修改时间（可选）
-    //dir->i_mtime = get_seconds();
     // 父目录的inode也需要写回（修改时间变化）
     struct ext2_inode *dir_ei = (struct ext2_inode *)dir->private_data;
-    // dir_ei->i_mtime = dir->i_mtime;
+    dir_ei->i_mtime = (uint32_t)get_time();
     ext2_write_inode(sb, dir->ino, dir_ei);
 
     return 0;
@@ -360,6 +360,12 @@ static int ext2_lookup(struct inode *dir, struct dentry *dentry)
     uint8_t *buf = kmalloc(block_size);
     if (!buf) return -1;
 
+    #ifndef NOATIME
+    ext2_inode_t *dir_ei = dir->private_data;
+    dir_ei->i_atime = (uint32_t)get_time();
+    ext2_write_inode(dir->sb,dir->ino,dir_ei);
+    #endif
+
     for (block = 0; block < blocks; block++) {
         uint32_t phys_block = ext2_bmap(dir, block);
         if (phys_block == 0) {
@@ -424,7 +430,7 @@ static int ext2_mkdir(struct inode *dir, struct dentry *dentry, int mode)
     ei.i_uid = 0;
     ei.i_gid = 0;
     ei.i_size = 0;
-    ei.i_atime = ei.i_ctime = ei.i_mtime = 0;//get_seconds();
+    ei.i_atime = ei.i_ctime = ei.i_mtime = (uint32_t)get_time();
     ei.i_links_count = 2;               // "." + 父目录项
     ei.i_blocks = 0;
     ei.i_flags = 0;
@@ -437,7 +443,7 @@ static int ext2_mkdir(struct inode *dir, struct dentry *dentry, int mode)
         goto out_inode;
 
     // 4. 分配第一个数据块（逻辑块 0）
-    uint32_t phys_block = ext2_bmap_alloc(new_inode, 0);
+    uint32_t phys_block = ext2_bmap_alloc(new_inode, 0, NULL);
     if (phys_block == (uint32_t)-1)
         goto out_vfs_inode;
 
@@ -489,9 +495,8 @@ static int ext2_mkdir(struct inode *dir, struct dentry *dentry, int mode)
         goto out_block_inode;
 
     // 8. 更新父目录的元数据
-    //dir->i_mtime = get_seconds();
     struct ext2_inode *dir_ei = (struct ext2_inode *)dir->private_data;
-    //dir_ei->i_mtime = dir->i_mtime;
+    dir_ei->i_mtime = dir_ei->i_ctime = get_time();
     dir_ei->i_links_count++;        // 父目录增加一个子目录，链接计数加 1
     ext2_write_inode(sb, dir->ino, dir_ei);
 
@@ -532,10 +537,8 @@ static int ext2_unlink(struct inode *dir, struct dentry *dentry)
         return -1;
     }
 
-    // 更新父目录的修改时间
-    // dir->i_mtime = get_seconds();
     struct ext2_inode *dir_ei = (struct ext2_inode *)dir->private_data;
-    // dir_ei->i_mtime = dir->i_mtime;
+    dir_ei->i_mtime = get_time();
     ext2_write_inode(sb, dir->ino, dir_ei);
 
     return 0;
@@ -563,6 +566,7 @@ static int ext2_setattr(struct inode *inode, struct iattr *attr)
     // 更新磁盘 inode
     struct ext2_inode *ei = (struct ext2_inode *)inode->private_data;
     ei->i_size = new_size;
+    ei->i_mtime = ei->i_ctime = get_time();
     ext2_write_inode(inode->sb, inode->ino, ei);
 
     return 0;
@@ -627,16 +631,12 @@ static int ext2_rmdir(struct inode *dir, struct dentry *dentry)
     }
 
     // 更新父目录的修改时间
-    //dir->i_mtime = get_seconds();
     struct ext2_inode *dir_ei = (struct ext2_inode *)dir->private_data;
-    //dir_ei->i_mtime = dir->i_mtime;
+    dir_ei->i_mtime = dir_ei->i_ctime = (uint32_t)get_time();
     dir_ei->i_links_count -= 1;
     ext2_write_inode(sb, dir->ino, dir_ei);
 
-    // 更新块组信息
     gd->bg_used_dirs_count--;
-    //gd->dirty = 1;
-    //fsi->sb_dirty = 1;
 
     return 0;
 }
@@ -669,23 +669,16 @@ static int ext2_rename(struct inode *old_dir, struct dentry *old_dentry,struct i
     if (S_ISDIR(inode->mode) && old_dir != new_dir) {
         // old_dir 失去一个子目录，链接计数减1
         old_dir_ei->i_links_count--;
-        ext2_write_inode(sb, old_dir->ino, old_dir_ei);
-
         // new_dir 增加一个子目录，链接计数加1
         new_dir_ei->i_links_count++;
-        ext2_write_inode(sb, new_dir->ino, new_dir_ei);
     }
 
     // 4. 更新 old_dir 和 new_dir 的修改时间
-    // old_dir->i_mtime = get_seconds();
-    // old_dir_ei->i_mtime = old_dir->i_mtime;
-    //ext2_write_inode(sb, old_dir->ino, old_dir_ei);
+    new_dir_ei->i_ctime = old_dir_ei->i_ctime = new_dir_ei->i_mtime = old_dir_ei->i_mtime = get_time();
+    ext2_write_inode(sb, old_dir->ino, old_dir_ei);
+    ext2_write_inode(sb, new_dir->ino, new_dir_ei);
 
-    //new_dir->i_mtime = get_seconds();
-    //new_dir_ei->i_mtime = new_dir->i_mtime;
-    //ext2_write_inode(sb, new_dir->ino, new_dir_ei);
-
-    // 5. 如果移动的是目录，需要更新被移动目录本身的 .. 指向？实际上不需要，因为 .. 指向新父目录，但它的内容中 .. 项的 inode 应该更新。不过 ext2 中，移动目录时，需要修改该目录的 ".." 目录项，使其 inode 指向新的父目录。所以必须处理！
+    // 5. 如果移动的是目录，需要更新被移动目录本身的 .. 指向
     if (S_ISDIR(inode->mode) && old_dir != new_dir) {
         // 需要修改被移动目录的第一个数据块中的 ".." 项
         uint32_t block_size = fsi->block_size;
@@ -722,6 +715,12 @@ static ssize_t ext2_read(struct file *file, char __user *buf, size_t len, loff_t
     ssize_t ret = 0;
     uint8_t *block_buf;
 
+    #ifndef NOATIME
+    ext2_inode_t *inode_ei = inode->private_data;
+    inode_ei->i_atime = (uint32_t)get_time();
+    ext2_write_inode(inode->sb,inode->ino,inode_ei);
+    #endif
+
     if (pos >= (int64_t)inode->size)
         return 0;
     if (pos + count > inode->size)
@@ -757,7 +756,7 @@ static ssize_t ext2_read(struct file *file, char __user *buf, size_t len, loff_t
             }
         }
 
-        // 将数据复制到用户缓冲区（这里简化使用 memcpy，实际需用 copy_to_user）
+        // 将数据复制到用户缓冲区
         copy_to_user(buf, block_buf + offset, to_read);
 
         kfree(block_buf);
@@ -781,6 +780,7 @@ static ssize_t ext2_write(struct file *file, const char __user *buf, size_t len,
     size_t count = len;
     ssize_t ret = 0;
     uint8_t *block_buf;
+    bool dirty = false;
 
     while (count > 0) {
         uint32_t logical_block = pos / block_size;
@@ -790,7 +790,7 @@ static ssize_t ext2_write(struct file *file, const char __user *buf, size_t len,
             to_write = count;
 
         /* 获取或分配物理块 */
-        uint32_t phys_block = ext2_bmap_alloc(inode, logical_block);
+        uint32_t phys_block = ext2_bmap_alloc(inode, logical_block, &dirty);
         if (phys_block == (uint32_t)-1) {
             ret = -1;
             break;
@@ -829,7 +829,7 @@ static ssize_t ext2_write(struct file *file, const char __user *buf, size_t len,
         ret += to_write;
     }
 
-    if (ret > 0) {
+    if (ret > 0 || dirty) {
         /* 更新文件大小 */
         if (pos > (loff_t)inode->size) {
             inode->size = pos;
@@ -837,9 +837,8 @@ static ssize_t ext2_write(struct file *file, const char __user *buf, size_t len,
         /* 更新 inode 的磁盘副本（包括大小、块指针等） */
         struct ext2_inode *ei = (struct ext2_inode *)inode->private_data;
         ei->i_size = inode->size;
-        /* 更新修改时间等（此处省略时间戳） */
+        ei->i_ctime = ei->i_mtime = get_time();
         if (ext2_write_inode(inode->sb, inode->ino, ei) < 0) {
-            /* 写回失败，但数据可能已部分写入，返回已写入长度？这里简单返回错误 */
             ret = -1;
         }
     }
@@ -864,6 +863,12 @@ static int ext2_readdir(struct file *file, struct dirent __user *dirp, unsigned 
     uint32_t block_idx;
     uint8_t *buf = kmalloc(block_size);
     if (!buf) return -1;
+
+    #ifndef NOATIME
+    ext2_inode_t *inode_ei = inode->private_data;
+    inode_ei->i_atime = (uint32_t)get_time();
+    ext2_write_inode(inode->sb,inode->ino,inode_ei);
+    #endif
 
     for (block_idx = 0; block_idx < blocks; block_idx++) {
         uint32_t phys = ext2_bmap(inode, block_idx);
@@ -944,17 +949,19 @@ static inline void ext2_set_block_all_zero(super_block_t *sb,uint32_t new_block,
     kfree(temp);
 }
 
-static void ext2_free_ind_blocks(struct super_block *sb, uint32_t block, int level)
+static void ext2_free_ind_blocks(struct super_block *sb, uint32_t block, int level, ext2_inode_t *ei)
 {
     ext2_fs_info_t *fsi = sb->private_data;
     uint32_t block_size = fsi->block_size;
     uint32_t per_block = block_size / sizeof(uint32_t);
     uint32_t *buf;
     uint32_t i;
+    uint32_t delta = 2 << fsi->es.s_log_block_size;
 
     if (block == 0) return;
     if (level == 0) {
         ext2_free_block(sb, block);
+        ei->i_blocks -= delta;
         return;
     }
     buf = kmalloc(block_size);
@@ -965,9 +972,10 @@ static void ext2_free_ind_blocks(struct super_block *sb, uint32_t block, int lev
     }
     for (i = 0; i < per_block; i++) {
         if (buf[i])
-            ext2_free_ind_blocks(sb, buf[i], level - 1);
+            ext2_free_ind_blocks(sb, buf[i], level - 1, ei);
     }
     ext2_free_block(sb, block);
+    ei->i_blocks -= delta;
     kfree(buf);
 }
 
@@ -979,12 +987,14 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
     uint32_t per_block = block_size / sizeof(uint32_t);
     uint32_t new_blocks = (new_size + block_size - 1) / block_size;
     uint32_t old_blocks = (inode->size + block_size - 1) / block_size;
+    uint32_t delta = 2 << fsi->es.s_log_block_size;
     int i;
 
     // 释放直接块
     for (i = new_blocks; i < EXT2_NDIR_BLOCKS && (uint32_t)i < old_blocks; i++) {
         if (ei->i_block[i]) {
             ext2_free_block(inode->sb, ei->i_block[i]);
+            ei->i_blocks -= delta;
             ei->i_block[i] = 0;
         }
     }
@@ -992,7 +1002,7 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
     // 处理一级间接块
     if (new_blocks <= EXT2_NDIR_BLOCKS) {
         if (ei->i_block[EXT2_IND_BLOCK]) {
-            ext2_free_ind_blocks(inode->sb, ei->i_block[EXT2_IND_BLOCK], 1);
+            ext2_free_ind_blocks(inode->sb, ei->i_block[EXT2_IND_BLOCK], 1, ei);
             ei->i_block[EXT2_IND_BLOCK] = 0;
         }
     } else {
@@ -1008,6 +1018,7 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
             for (i = ind_start; (uint32_t)i < per_block; i++) {
                 if (ind_buf[i]) {
                     ext2_free_block(inode->sb, ind_buf[i]);
+                    ei->i_blocks -= delta;
                     ind_buf[i] = 0;
                 }
             }
@@ -1019,7 +1030,7 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
     // 处理二级间接块
     if (new_blocks <= EXT2_NDIR_BLOCKS + per_block) {
         if (ei->i_block[EXT2_DIND_BLOCK]) {
-            ext2_free_ind_blocks(inode->sb, ei->i_block[EXT2_DIND_BLOCK], 2);
+            ext2_free_ind_blocks(inode->sb, ei->i_block[EXT2_DIND_BLOCK], 2, ei);
             ei->i_block[EXT2_DIND_BLOCK] = 0;
         }
     } else {
@@ -1051,6 +1062,7 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
                         for (uint32_t j = sub_start; j < per_block; j++) {
                             if (sub_buf[j]) {
                                 ext2_free_block(inode->sb, sub_buf[j]);
+                                ei->i_blocks -= delta;
                                 sub_buf[j] = 0;
                             }
                         }
@@ -1058,7 +1070,7 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
                         kfree(sub_buf);
                     } else {
                         // 释放整个一级间接块及其所有数据块
-                        ext2_free_ind_blocks(inode->sb, dind_buf[i], 1);
+                        ext2_free_ind_blocks(inode->sb, dind_buf[i], 1, ei);
                         dind_buf[i] = 0;
                     }
                 }
@@ -1072,7 +1084,7 @@ static int ext2_truncate_blocks(struct inode *inode, loff_t new_size)
     return 0;
 }
 
-static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
+static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block,bool *dirty)
 {
     ext2_fs_info_t *fsi = inode->sb->private_data;
     struct ext2_inode *ei = (struct ext2_inode *)inode->private_data;
@@ -1083,12 +1095,16 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
     uint32_t *ind_buf = NULL;
     uint32_t *dind_buf = NULL;
     uint32_t new_block;
+    uint32_t delta = 2 << fsi->es.s_log_block_size;
     int ret;
 
     /* 直接块 */
     if (logical_block < EXT2_NDIR_BLOCKS) {
         if (ei->i_block[logical_block] == 0) {
             new_block = ext2_alloc_block(inode->sb);
+            ei->i_blocks += delta;
+            if (dirty)
+                *dirty = true;
             if (new_block == (uint32_t)-1) return -1;
             ei->i_block[logical_block] = new_block;
         }
@@ -1100,6 +1116,9 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
         uint32_t index = logical_block - EXT2_NDIR_BLOCKS;
         if (ei->i_block[EXT2_IND_BLOCK] == 0) {
             new_block = ext2_alloc_block(inode->sb);
+            ei->i_blocks += delta;
+            if (dirty)
+                *dirty = true;
             if (new_block == (uint32_t)-1) return -1;
             ei->i_block[EXT2_IND_BLOCK] = new_block;
             ext2_set_block_all_zero(inode->sb,new_block,block_size);
@@ -1113,6 +1132,9 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
         }
         if (ind_buf[index] == 0) {
             new_block = ext2_alloc_block(inode->sb);
+            ei->i_blocks += delta;
+            if (dirty)
+                *dirty = true;
             if (new_block == (uint32_t)-1) {
                 kfree(ind_buf);
                 return -1;
@@ -1132,6 +1154,9 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
         uint32_t ind_idx = offset % per_block;
         if (ei->i_block[EXT2_DIND_BLOCK] == 0) {
             new_block = ext2_alloc_block(inode->sb);
+            ei->i_blocks += delta;
+            if (dirty)
+                *dirty = true;
             if (new_block == (uint32_t)-1) return -1;
             ei->i_block[EXT2_DIND_BLOCK] = new_block;
             ext2_set_block_all_zero(inode->sb,new_block,block_size);
@@ -1145,6 +1170,9 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
         }
         if (dind_buf[dind_idx] == 0) {
             new_block = ext2_alloc_block(inode->sb);
+            ei->i_blocks += delta;
+            if (dirty)
+                *dirty = true;
             if (new_block == (uint32_t)-1) {
                 kfree(dind_buf);
                 return -1;
@@ -1164,6 +1192,9 @@ static int ext2_bmap_alloc(struct inode *inode, uint32_t logical_block)
         }
         if (ind_buf[ind_idx] == 0) {
             new_block = ext2_alloc_block(inode->sb);
+            ei->i_blocks += delta;
+            if (dirty)
+                *dirty = true;
             if (new_block == (uint32_t)-1) {
                 kfree(ind_buf);
                 return -1;
@@ -1293,7 +1324,7 @@ static int ext2_dir_add_entry(struct inode *dir, const char *name, uint32_t ino,
         return -1;
     }
     uint32_t new_block_idx = blocks;  // 新的逻辑块号
-    uint32_t phys_new_block = ext2_bmap_alloc(dir, new_block_idx);
+    uint32_t phys_new_block = ext2_bmap_alloc(dir, new_block_idx, NULL);
     if (phys_new_block == (uint32_t)-1){
         kfree(block_buf);
         return -1;

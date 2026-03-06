@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 void *init_ahci_disk(int pcie_addr);
+int init_uhci_controller(uint8_t bus, uint8_t dev, uint8_t func);
 static void pci_match_driver(uint8_t bus, uint8_t dev, uint8_t func, uint8_t class, uint8_t subclass, uint8_t progif);
 void init_ahci_mem(void);
 
@@ -56,18 +57,11 @@ static void pci_match_driver(uint8_t bus, uint8_t dev, uint8_t func, uint8_t cla
             init_ahci_disk(MAKE_PCIE_ADDR(bus, dev, func, 0));
         break;
 
-    case 0x0C: // Serial bus
-               // if (subclass == 0x03)
-               //{
-               //    if (progif == 0x30)
-               //        init_xhci(bus, dev, func);
-               //    else if (progif == 0x20)
-               //        init_ehci(bus, dev, func);
-               //    else if (progif == 0x00)
-               //        init_uhci(bus, dev, func);
-               //}
-               // break;
-
+    case 0x0C:
+        if (subclass == 0x03 && progif == 0x00) { // UHCI
+            init_uhci_controller(bus, dev, func);
+        }
+        break;
     default:
         break;
     }

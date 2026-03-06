@@ -19,6 +19,9 @@ uint32_t read_pcie(uint32_t addr);
 #define DEVICE_VENDER 0
 /// @brief |31-26 Status|15-0 Command|
 #define STATUS_COMMAND 0x4
+
+#define PCI_CMD_BUS_MASTER  0x04    // 启用总线主控
+
 /// @brief |31-24 Class Code|23-16 Sub Class|15-8 Prog IF|7-0 Revision ID|
 #define CLASSCODE_SUBCLASS_PROGIF_REVISIONID 0x8
 /// @brief |31-24 BIST|23-16 Header Type|15-8 Latency Timer|7-0 Cache Line Size

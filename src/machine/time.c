@@ -316,3 +316,12 @@ void sys_clock_gettime(void *addr){
     time.tv_nsec = j * (1000000000UL / CLOCK_FREQ);
     copy_to_user(addr,&time,sizeof(utimespec_t));
 }
+
+void mdelay(uint64_t ms){
+    uint64_t start_ticks = ticks;
+    uint64_t delta = ms * CLOCK_FREQ / 1000;
+    while (ticks - start_ticks < delta)
+    {
+        sys_yield();
+    }
+}
