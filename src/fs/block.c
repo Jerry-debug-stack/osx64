@@ -149,9 +149,12 @@ static ssize_t block_file_read(struct file *file, char __user *buf,size_t len, i
         return -1;
     block_device_t *dev = file->inode->private_data;
     ssize_t ret = partition_read(dev,*ppos,len,buf);
-    if (ret >= 0)
-        *ppos += ret;
-    return ret;
+    if (ret == 0){
+        *ppos += len;
+        return len;
+    }else{
+        return -1;
+    }
 }
 
 static ssize_t block_file_write(struct file *file, const char __user *buf,size_t len, int64_t *ppos){
@@ -159,9 +162,12 @@ static ssize_t block_file_write(struct file *file, const char __user *buf,size_t
         return -1;
     block_device_t *dev = file->inode->private_data;
     ssize_t ret = partition_write(dev,*ppos,len,buf);
-    if (ret >= 0)
-        *ppos += ret;
-    return ret;
+    if (ret == 0){
+        *ppos += len;
+        return len;
+    }else{
+        return -1;
+    }
 }
 
 static int block_file_fsync(UNUSED struct file *file){
@@ -201,7 +207,7 @@ static void load_primary_partition(block_device_t* disk,mbr_entry_t* ent,int ind
 
     part->device.type         = BLOCK_PARTITION;
     part->device.block_size   = disk->block_size;
-    part->device.total_blocks = ent->sector_count;
+    part->device.total_blocks = (uint64_t)ent->sector_count;
     part->device.read         = partition_read;
     part->device.write        = partition_write;
     part->device.private_data = part;
@@ -269,7 +275,7 @@ static void scan_extended(block_device_t* disk,uint32_t ext_base_lba,bool locked
 
             part->device.type         = BLOCK_PARTITION;
             part->device.block_size   = disk->block_size;
-            part->device.total_blocks = part_entry->sector_count;
+            part->device.total_blocks = (uint64_t)part_entry->sector_count;
             part->device.read         = partition_read;
             part->device.write        = partition_write;
             part->device.private_data = part;

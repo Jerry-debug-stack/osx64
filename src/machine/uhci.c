@@ -374,7 +374,7 @@ static int uhci_block_write(struct block_device* dev,uint64_t lba,uint32_t count
 static void uhci_register_block_device(struct usb_device *udev)
 {
     block_device_t *bdev = kmalloc(sizeof(real_device_t));
-    bdev->total_blocks = udev->block_count;
+    bdev->total_blocks = (uint64_t)udev->block_count;
     bdev->block_size = 512;
     bdev->private_data = udev;
     bdev->type = BLOCK_DISK;

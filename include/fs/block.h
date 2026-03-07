@@ -18,7 +18,7 @@ typedef struct block_device {
     char name[18];
     void *private_data;
     uint64_t block_size;
-    uint32_t total_blocks;
+    uint64_t total_blocks;
 
     list_head_t global_list;
     struct dentry *fs_dentry;

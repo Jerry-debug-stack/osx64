@@ -1040,7 +1040,7 @@ int devfs_block_register(const char *name,int mode, struct file_operations *fops
     atomic_set(&new_node->refcount,1);
     atomic_set(&new_node->link_count,1);
     new_node->sb = devfs_sb;
-    new_node->size = 0;
+    new_node->size = bdev->total_blocks;
 
     dentry_t *new_dentry = dentry_create(name,new_node);
     if (!new_dentry){

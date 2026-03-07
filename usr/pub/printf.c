@@ -3,6 +3,7 @@
 #include "ustring.h"
 #include "mem.h"
 #include "math.h"
+#include "uctype.h"
 
 #include <stdarg.h> // 可变参数支持
 
@@ -273,6 +274,242 @@ static uint32_t vsnprintf(char* buf, uint32_t size, const char* fmt, va_list arg
     }
     buf[pos] = '\0';
     return pos;
+}
+
+
+// 跳过空白字符
+static void skip_whitespace(const char **s) {
+    while (isspace(**s)) (*s)++;
+}
+
+// 将字符串转换为整数
+static uint64_t str2uint(const char **s, int base, int *chars_used) {
+    const char *p = *s;
+    uint64_t val = 0;
+    int count = 0;
+    while (1) {
+        int digit;
+        if (isdigit(*p))
+            digit = *p - '0';
+        else if (isalpha(*p)) {
+            char c = tolower(*p);
+            if (c >= 'a' && c <= 'f')
+                digit = c - 'a' + 10;
+            else
+                break;
+        } else
+            break;
+        if (digit >= base) break;
+        val = val * base + digit;
+        p++;
+        count++;
+    }
+    *chars_used = count;
+    *s = p;
+    return val;
+}
+
+static int vsscanf(const char *str, const char *fmt, va_list ap) {
+    int matched = 0;
+    const char *s = str;
+    const char *f = fmt;
+
+    while (*f && *s) {
+        if (isspace(*f)) {
+            skip_whitespace(&f);
+            skip_whitespace(&s);
+            continue;
+        }
+        if (*f == '%') {
+            f++;
+            if (*f == '%') {
+                if (*s != '%') break;
+                s++;
+                f++;
+                continue;
+            }
+            int longmod = 0;
+            if (*f == 'h') {
+                f++;
+            } else if (*f == 'l') {
+                f++;
+                if (*f == 'l') {
+                    f++;
+                    longmod = 2;
+                } else {
+                    longmod = 1;
+                }
+            }
+            int skip_ws = 1;
+            if (*f == 'c') skip_ws = 0;
+
+            if (skip_ws) skip_whitespace(&s);
+            if (*s == '\0') break;
+
+            if (*f == 'd') {
+                int negative = 0;
+                if (*s == '+') {
+                    s++;
+                } else if (*s == '-') {
+                    negative = 1;
+                    s++;
+                }
+                int used;
+                uint64_t uval = str2uint(&s, 10, &used);
+                if (used == 0) break;
+                int64_t val = negative ? -(int64_t)uval : (int64_t)uval;
+                if (longmod == 2) {
+                    long long *p = va_arg(ap, long long*);
+                    *p = (long long)val;
+                } else if (longmod == 1) {
+                    long *p = va_arg(ap, long*);
+                    *p = (long)val;
+                } else {
+                    int *p = va_arg(ap, int*);
+                    *p = (int)val;
+                }
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 'i') {
+                int negative = 0;
+                if (*s == '+') {
+                    s++;
+                } else if (*s == '-') {
+                    negative = 1;
+                    s++;
+                }
+                int base = 10;
+                const char *p = s;
+                if (*p == '0') {
+                    p++;
+                    if (*p == 'x' || *p == 'X') {
+                        base = 16;
+                        s = p + 1; // 跳过 '0x'
+                    } else {
+                        base = 8;
+                        // s 保持指向第一个 '0'，由 str2uint 处理
+                    }
+                }
+                int used;
+                uint64_t uval = str2uint(&s, base, &used);
+                if (used == 0) break;
+                int64_t val = negative ? -(int64_t)uval : (int64_t)uval;
+                if (longmod == 2) {
+                    long long *p = va_arg(ap, long long*);
+                    *p = (long long)val;
+                } else if (longmod == 1) {
+                    long *p = va_arg(ap, long*);
+                    *p = (long)val;
+                } else {
+                    int *p = va_arg(ap, int*);
+                    *p = (int)val;
+                }
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 'u') {
+                // 无符号十进制
+                int used;
+                uint64_t val = str2uint(&s, 10, &used);
+                if (used == 0) break;
+                if (longmod == 2) {
+                    unsigned long long *p = va_arg(ap, unsigned long long*);
+                    *p = (unsigned long long)val;
+                } else if (longmod == 1) {
+                    unsigned long *p = va_arg(ap, unsigned long*);
+                    *p = (unsigned long)val;
+                } else {
+                    unsigned int *p = va_arg(ap, unsigned int*);
+                    *p = (unsigned int)val;
+                }
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 'x' || *f == 'X') {
+                // 十六进制
+                int used;
+                uint64_t val = str2uint(&s, 16, &used);
+                if (used == 0) break;
+                if (longmod == 2) {
+                    unsigned long long *p = va_arg(ap, unsigned long long*);
+                    *p = val;
+                } else if (longmod == 1) {
+                    unsigned long *p = va_arg(ap, unsigned long*);
+                    *p = (unsigned long)val;
+                } else {
+                    unsigned int *p = va_arg(ap, unsigned int*);
+                    *p = (unsigned int)val;
+                }
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 'o') {
+                // 八进制
+                int used;
+                uint64_t val = str2uint(&s, 8, &used);
+                if (used == 0) break;
+                if (longmod == 2) {
+                    unsigned long long *p = va_arg(ap, unsigned long long*);
+                    *p = val;
+                } else if (longmod == 1) {
+                    unsigned long *p = va_arg(ap, unsigned long*);
+                    *p = (unsigned long)val;
+                } else {
+                    unsigned int *p = va_arg(ap, unsigned int*);
+                    *p = (unsigned int)val;
+                }
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 's') {
+                // 字符串（跳过前导空白，然后读取非空白字符）
+                skip_whitespace(&s);
+                if (*s == '\0') break;
+                char *out = va_arg(ap, char*);
+                while (*s && !isspace(*s)) {
+                    *out++ = *s++;
+                }
+                *out = '\0';
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 'c') {
+                // 字符（不跳过空白）
+                char *out = va_arg(ap, char*);
+                *out = *s++;
+                matched++;
+                f++;
+                continue;
+            } else if (*f == 'p') {
+                // 指针（十六进制地址）
+                int used;
+                uint64_t val = str2uint(&s, 16, &used);
+                if (used == 0) break;
+                void **p = va_arg(ap, void**);
+                *p = (void*)(uintptr_t)val;
+                matched++;
+                f++;
+                continue;
+            } else {
+                // 不支持的格式，跳过
+                f++;
+            }
+        } else {
+            if (*f != *s) break;
+            f++;
+            s++;
+        }
+    }
+    return matched;
+}
+
+int sscanf(const char *str, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int ret = vsscanf(str, fmt, ap);
+    va_end(ap);
+    return ret;
 }
 
 uint32_t printf(const char* fmt,...){

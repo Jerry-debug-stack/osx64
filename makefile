@@ -21,7 +21,7 @@ PUB_OBJS		= $(patsubst usr/pub/%.c, target/usr/pub/%.o, $(PUB_C_SRCS)) \
 EXCLUDE_SUBDIRS = usr/pub/ usr/include/
 USER_SUBDIRS    = $(filter-out $(EXCLUDE_SUBDIRS), $(wildcard usr/*/))
 USER_PROGS		= $(notdir $(patsubst %/, %, $(USER_SUBDIRS)))
-USER_ELFS		= $(addprefix target/, $(addsuffix .elf, $(USER_PROGS)))
+USER_ELFS		= $(addprefix target/, $(USER_PROGS))
 
 # 内核源文件
 c_srcs			= $(shell find src -name "*.c")
@@ -62,7 +62,7 @@ $(1)_SRCS_C   = $$(wildcard usr/$(1)/*.c)
 $(1)_SRCS_ASM = $$(wildcard usr/$(1)/*.asm)
 $(1)_OBJS     = $$(patsubst usr/$(1)/%.c, target/usr/$(1)/%.o, $$($(1)_SRCS_C)) \
                 $$(patsubst usr/$(1)/%.asm, target/usr/$(1)/%.o, $$($(1)_SRCS_ASM))
-target/$(1).elf: $$($(1)_OBJS) $(PUB_OBJS)
+target/$(1): $$($(1)_OBJS) $(PUB_OBJS)
 	@mkdir -p $$(dir $$@)
 	$$(ld) -m elf_x86_64 --entry=main -o $$@ $$^
 endef
