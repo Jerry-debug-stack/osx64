@@ -119,6 +119,12 @@
     - [ ] named pipe
 - [ ] signal
 - [ ] ipc
+- [ ] build an install media
+    - [x] insights into grub
+    - [ ] mkfs for ext2
+    - [ ] dd
+    - [ ] uuid
+        - [ ] read and write for user
 
 就是这样了，上面的内容应该会逐步完成(一边做一边写)  
 ***
