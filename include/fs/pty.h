@@ -49,6 +49,8 @@ typedef struct pty_pair {
     uint32_t s2m_tail;
     spinlock_t lock;
     struct line_discipline ldisc;
+    wait_queue_t wq_s_r;
+    wait_queue_t wq_s_w;
 } pty_pair_t;
 
 extern pty_pair_t *pty_pairs;

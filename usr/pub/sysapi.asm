@@ -26,6 +26,7 @@ global fork
 global execv
 global reboot
 global clock_gettime
+global pipe
 
 section .text
     bits 64
@@ -166,5 +167,10 @@ section .text
 
     clock_gettime:
         mov rax,27
+        int 0x80
+        ret
+    
+    pipe:
+        mov rax,28
         int 0x80
         ret

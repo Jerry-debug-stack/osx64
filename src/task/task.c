@@ -260,7 +260,6 @@ void schedule(void){
 }
 
 static inline _Noreturn void schedule_zombie(){
-    get_current()->state = TASK_ZOMBIE;
     schedule();
     __builtin_unreachable();
 }
@@ -302,6 +301,7 @@ _Noreturn void sys_exit(int exit_status){
 
     /* 设置退出代码 */
     task->exit_status = exit_status;
+    task->state = TASK_ZOMBIE;
     wake_up_all(&task->parent->wait_queue);
     schedule_zombie();
 }

@@ -29,6 +29,7 @@ int sys_sync(void);
 int sys_execv(const char* path, char* const argv[]);
 int sys_reboot(int cmd);
 void sys_clock_gettime(void *addr);
+int sys_pipe(int pipe[2]);
 
 void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_time,
@@ -59,4 +60,5 @@ void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_execv,
     sys_reboot,
     sys_clock_gettime,
+    sys_pipe
 };

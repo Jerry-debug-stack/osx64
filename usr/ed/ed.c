@@ -122,8 +122,6 @@ char *read_line(void) {
             char *line = malloc(ret + 1);
             if (line) strcpy(line, buf);
             return line;
-        } else if (ret == 0) {
-            yield();
         } else {
             return NULL;
         }

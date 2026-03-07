@@ -922,7 +922,9 @@ int vfs_close(struct file *file)
     if (!atomic_dec_and_test(&file->refcount))
         return 0;  // 还有其他引用
 
-    super_block_t *sb = file->dentry->in_mnt;
+    super_block_t *sb = NULL;
+    if (file->dentry)
+        sb = file->dentry->in_mnt;
 
     // 调用 release 方法
     if (file->file_ops && file->file_ops->release)

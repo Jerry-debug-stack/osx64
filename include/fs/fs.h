@@ -161,11 +161,13 @@ static inline void inode_get(inode_t *inode)
 void inode_put(inode_t *inode);
 static inline void sb_get(super_block_t *sb)
 {
-    atomic_inc(&sb->fs_ref);
+    if (sb)
+        atomic_inc(&sb->fs_ref);
 }
 static inline void sb_put(super_block_t *sb)
 {
-    atomic_dec(&sb->fs_ref);
+    if (sb)
+        atomic_dec(&sb->fs_ref);
 }
 static inline void getin_cwd(dentry_t *dentry){
     sb_get(dentry->in_mnt);

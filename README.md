@@ -115,7 +115,10 @@
         - [x] scsi ops
     - [ ] other protocols(maybe)
 - [ ] pipe
-
+    - [x] anonymous pipe
+    - [ ] named pipe
+- [ ] signal
+- [ ] ipc
 
 就是这样了，上面的内容应该会逐步完成(一边做一边写)  
 ***

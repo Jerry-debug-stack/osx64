@@ -33,6 +33,7 @@ static void ldisc_input(struct pty_pair *pair, const char *data, size_t len)
 {
     struct line_discipline *ld = &pair->ldisc;
     spin_lock(&ld->lock);
+    bool new_lines = false;
 
     for (size_t i = 0; i < len; i++) {
         char c = data[i];
@@ -40,6 +41,7 @@ static void ldisc_input(struct pty_pair *pair, const char *data, size_t len)
             // 回车：提交当前行
             char *line = kmalloc(ld->line_pos + 1);
             if (line) {
+                new_lines = true;
                 memcpy(line, ld->line_buf, ld->line_pos);
                 line[ld->line_pos] = '\0';
                 int next = (ld->completed_head + 1) % LINE_QUEUE_SIZE;
@@ -75,6 +77,9 @@ static void ldisc_input(struct pty_pair *pair, const char *data, size_t len)
             
         }
     }
+    if (new_lines){
+        wake_up_all(&pair->wq_s_r);
+    }
     spin_unlock(&ld->lock);
 }
 
@@ -92,6 +97,8 @@ static int pty_master_open(struct inode *inode, struct file *file)
         pair->m2s_head = pair->m2s_tail = 0;
         pair->s2m_head = pair->s2m_tail = 0;
         ldisc_init(&pair->ldisc);
+        wait_queue_init(&pair->wq_s_r);
+        wait_queue_init(&pair->wq_s_w);
     }
     pair->master_ref++;
     spin_unlock(&pair->lock);
@@ -105,14 +112,15 @@ static ssize_t pty_master_read(struct file *file, char *buf, size_t len, UNUSED 
     pty_pair_t *pair = file->private_data;
     size_t count = 0;
 
-    uint8_t intr = io_cli();
     spin_lock(&pair->lock);
     while (count < len && pair->s2m_head != pair->s2m_tail) {
         buf[count++] = pair->s2m_buf[pair->s2m_tail];
         pair->s2m_tail = (pair->s2m_tail + 1) % PTY_BUFSIZE;
     }
+    if (count){
+        wake_up_all(&pair->wq_s_w);
+    }
     spin_unlock(&pair->lock);
-    io_set_intr(intr);
 
     // 如果没有数据可读，返回0（非阻塞）
     return count;
@@ -171,15 +179,20 @@ static ssize_t pty_slave_read(struct file *file, char *buf, size_t len, UNUSED l
     struct line_discipline *ld = &pair->ldisc;
     size_t count = 0;
 
-    spin_lock(&ld->lock);
-    if (ld->completed_head == ld->completed_tail) {
-        spin_unlock(&ld->lock);
-        return 0; // 无数据，非阻塞
+    while(1){
+        spin_lock(&ld->lock);
+        if (ld->completed_head == ld->completed_tail) {
+            spin_lock(&pair->wq_s_r.lock);
+            spin_unlock(&ld->lock);
+            sleep_on_locked(&pair->wq_s_r);
+            continue;
+        }
+        break;
     }
+
     char *line = ld->completed_lines[ld->completed_tail];
     int line_len = strlen(line) + 1;
     if ((unsigned long)line_len > len) {
-        // 如果用户缓冲区不够大，只拷贝前 len 字节（通常应处理剩余，但简化）
         memcpy(buf, line, len);
         memmove(line, line + len, line_len - len);
         count = len;
@@ -198,17 +211,20 @@ static ssize_t pty_slave_write(struct file *file, const char *buf, size_t len, U
     pty_pair_t *pair = file->private_data;
     size_t count = 0;
 
-    uint8_t intr = io_cli();
     spin_lock(&pair->lock);
     while (count < len) {
         uint32_t next = (pair->s2m_head + 1) % PTY_BUFSIZE;
-        if (next == pair->s2m_tail)
-            break;
+        if (next == pair->s2m_tail) {
+            spin_lock(&pair->wq_s_w.lock);
+            spin_unlock(&pair->lock);
+            sleep_on_locked(&pair->wq_s_w);
+            spin_lock(&pair->lock);
+            continue;
+        }
         pair->s2m_buf[pair->s2m_head] = buf[count++];
         pair->s2m_head = next;
     }
     spin_unlock(&pair->lock);
-    io_set_intr(intr);
     return count;
 }
 

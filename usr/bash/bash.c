@@ -78,9 +78,8 @@ int main(UNUSED char* argv[])
         getcwd(path, 256);
         printf("[root %s %s]$", &name[0], path);
         ret = read(0,buffer,1023);
-        while (ret == 0)
+        while (ret < 0)
         {
-            yield();
             ret = read(0,buffer,1023);
         }
         ret = parse_command(buffer, &cmd);

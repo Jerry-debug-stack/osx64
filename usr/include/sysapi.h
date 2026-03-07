@@ -49,5 +49,6 @@ int fork(void);
 int execv(const char* path, char* const argv[]);
 int reboot(int cmd);
 void clock_gettime(utimespec_t *u);
+int pipe(int pipe[2]);
 
 #endif
