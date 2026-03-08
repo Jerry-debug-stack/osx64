@@ -123,7 +123,7 @@
     - [x] insights into grub
     - [x] mkfs for ext2
     - [x] dd
-    - [ ] cp
+    - [x] cp
     - [ ] uuid
         - [ ] read and write for user
 

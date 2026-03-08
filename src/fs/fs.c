@@ -1971,20 +1971,20 @@ int sys_fstat(int fd, stat_t *stat){
     if (file->dentry){
         if (file->dentry->flags & DENTRY_BLOCK_DEV){
             stat->block_size = 512;
-            stat->mode = DT_BLK;
+            stat->mode = S_IFBLK | 0755;
             goto next;
         }else if (file->dentry->flags & DENTRY_CHARACTER_DEV){
-            stat->mode = DT_CHR;
+            stat->mode = S_IFCHR | 0755;
             goto next;
         }else if (file->dentry->flags & DENTRY_BLOCK_ROOT){
-            stat->mode = DT_DIR;
+            stat->mode = S_IFDIR | 0755;
             goto next;
         }
     }
     if (file->inode){
-        stat->mode = S_ISDIR(file->inode->mode) ? DT_DIR : DT_REG;
+        stat->mode = file->inode->mode;
     }else{
-        stat->mode = DT_REG;
+        stat->mode = S_IFREG;
     }
 next:
     stat->file_size = 0;

@@ -323,37 +323,19 @@ static int bash_mv(char* argv[], int length)
     }
 }
 
-static int bash_cp(char* argv[], int length)
-{
-    if (length != 2) {
-        printf("cp [source] [destination]\nCopy file.\n");
-        return -1;
-    }
-
-    const char *src = argv[0];
-    const char *dst = argv[1];
-
+static int copy_file(const char *src, const char *dst) {
     int src_fd = open(src, O_RDONLY, 0);
     if (src_fd < 0) {
         printf("cp: cannot open '%s'\n", src);
         return -1;
     }
 
-    int dst_fd = open(dst, O_WRONLY | O_CREAT, 0644);
+    int dst_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (dst_fd < 0) {
         close(src_fd);
         printf("cp: cannot create '%s'\n", dst);
         return -1;
     }
-
-    if (ftruncate(dst_fd, 0) < 0) {
-        close(src_fd);
-        close(dst_fd);
-        printf("cp: cannot truncate '%s'\n", dst);
-        return -1;
-    }
-
-    lseek(dst_fd, 0, SEEK_SET);
 
     char buf[4096];
     ssize_t bytes_read, bytes_written;
@@ -388,6 +370,121 @@ static int bash_cp(char* argv[], int length)
     close(dst_fd);
     printf("cp: copied '%s' to '%s'\n", src, dst);
     return 0;
+}
+
+// 递归复制目录或文件
+static int cp_entry(const char *src, const char *dst) {
+    stat_t st;
+    int fd;
+
+    // 打开源路径以获取类型
+    fd = open(src, O_RDONLY, 0);
+    if (fd < 0) {
+        printf("cp: cannot open '%s'\n", src);
+        return -1;
+    }
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        printf("cp: cannot stat '%s'\n", src);
+        return -1;
+    }
+
+    // 判断源是文件还是目录
+    if (S_ISREG(st.mode)) {
+        // 源是普通文件
+        close(fd);
+
+        // 检查目标是否存在，以及是否为目录
+        int dst_fd = open(dst, O_RDONLY, 0);
+        if (dst_fd >= 0) {
+            struct stat dst_st;
+            if (fstat(dst_fd, &dst_st) == 0 && S_ISDIR(dst_st.mode)) {
+                // 目标是目录：将文件复制到目录下，保留原名
+                close(dst_fd);
+                char new_dst[256];
+                const char *base = strrchr(src, '/');
+                base = base ? base + 1 : src;
+                sprintf(new_dst, "%s/%s", sizeof(new_dst), dst, base);
+                return copy_file(src, new_dst);
+            }
+            close(dst_fd);
+        }
+        // 其他情况：直接复制到目标路径（覆盖或新建）
+        return copy_file(src, dst);
+    }
+    else if (S_ISDIR(st.mode)) {
+        // 源是目录
+        close(fd);
+
+        int tmpfd = open(dst, O_RDONLY, 0);
+        // 要求目标路径必须不存在（不能覆盖已有目录）
+        if (tmpfd >= 0) {
+            printf("cp: target '%s' already exists (cannot overwrite directory)\n", dst);
+            close(tmpfd);
+            return -1;
+        }
+
+        // 创建目标目录（权限 0755）
+        if (mkdir(dst, 0755) < 0) {
+            printf("cp: cannot create directory '%s'\n", dst);
+            return -1;
+        }
+
+        // 打开源目录准备遍历
+        int dir_fd = open(src, O_RDONLY, 0);
+        if (dir_fd < 0) {
+            printf("cp: cannot open directory '%s'\n", src);
+            return -1;
+        }
+
+        // 分配缓冲区存储目录项
+        char buf[4096];
+        struct dirent *dir = (struct dirent *)buf;
+
+        while (1) {
+            int ret = getdent(dir_fd, dir, sizeof(buf));
+            if (ret != 0)  // getdent 返回 0 表示成功读到一个条目，非0表示结束或出错
+                break;
+
+            // 跳过 "." 和 ".."
+            if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
+                continue;
+
+            // 构建源和目标子路径
+            char sub_src[256], sub_dst[256];
+            sprintf(sub_src, "%s/%s", sizeof(sub_src), src, dir->d_name);
+            sprintf(sub_dst, "%s/%s", sizeof(sub_dst), dst, dir->d_name);
+
+            // 递归复制子项
+            if (cp_entry(sub_src, sub_dst) < 0) {
+                close(dir_fd);
+                return -1;
+            }
+        }
+
+        close(dir_fd);
+        printf("cp: copied directory '%s' to '%s'\n", src, dst);
+        return 0;
+    }
+    else {
+        // 其他文件类型（如设备、管道等）暂不支持
+        close(fd);
+        printf("cp: '%s' is not a regular file or directory\n", src);
+        return -1;
+    }
+}
+
+static int bash_cp(char* argv[], int length)
+{
+    if (length != 2) {
+        printf("cp [source] [destination]\nCopy file or directory recursively.\n");
+        return -1;
+    }
+
+    const char *src = argv[0];
+    const char *dst = argv[1];
+
+    return cp_entry(src, dst);
 }
 
 static int bash_reboot(UNUSED char* argv[], int length)

@@ -269,7 +269,7 @@ static int write_superblock(void) {
     sb->s_block_group_nr = 0;
     // 高级特性全设为0
     sb->s_feature_compat = 0;
-    sb->s_feature_incompat = 0;
+    sb->s_feature_incompat = EXT2_FEATURE_INCOMPAT_FILETYPE;
     sb->s_feature_ro_compat = 0;
     // 生成UUID
     generate_and_print_uuid(g_params.total_blocks,sb->s_uuid);
@@ -280,15 +280,15 @@ static int write_superblock(void) {
     // 其他字段默认为0
 
     // 计算设备偏移量（字节）
-    off_t offset = rw_one_block * 2;
+    off_t offset = rw_one_block;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to superblock\n");
         free(sb_buf);
         return -1;
     }
 
-    ssize_t written = write(fd, (void *)sb_buf, rw_one_block * 2);
-    if (written != (ssize_t)rw_one_block * 2) {
+    ssize_t written = write(fd, (void *)sb_buf, rw_one_block);
+    if (written != (ssize_t)rw_one_block) {
         printf("Failed to write superblock (wrote %ld)\n", written);
         free(sb_buf);
         return -1;
@@ -592,16 +592,18 @@ int create_initial_dirs(void) {
     memset(data_buf, 0, block_size);
 
     // 目录项 "." 指向自己
-    struct ext2_dir_entry *entry = (struct ext2_dir_entry *)data_buf;
+    struct ext2_dir_entry_2 *entry = (struct ext2_dir_entry_2 *)data_buf;
     entry->inode = lostfound_inode_num;
     entry->name_len = 1;
+    entry->file_type = DT_DIR;
     entry->rec_len = 12;     // 8 + 1 + 3 填充到4字节边界
     entry->name[0] = '.';
 
     // 目录项 ".." 指向根目录
-    entry = (struct ext2_dir_entry *)(data_buf + 12);
+    entry = (struct ext2_dir_entry_2 *)(data_buf + 12);
     entry->inode = root_inode_num;
     entry->name_len = 2;
+    entry->file_type = DT_DIR;
     entry->rec_len = block_size - 12;   // 占据剩余空间
     entry->name[0] = '.';
     entry->name[1] = '.';
@@ -624,14 +626,15 @@ int create_initial_dirs(void) {
     memset(data_buf, 0, block_size);
 
     // 目录项 "." (inode 2)
-    entry = (struct ext2_dir_entry *)data_buf;
+    entry = (struct ext2_dir_entry_2 *)data_buf;
     entry->inode = root_inode_num;
     entry->name_len = 1;
+    entry->file_type = DT_DIR;
     entry->rec_len = 12;
     entry->name[0] = '.';
 
     // 目录项 ".." (inode 2)
-    entry = (struct ext2_dir_entry *)(data_buf + 12);
+    entry = (struct ext2_dir_entry_2 *)(data_buf + 12);
     entry->inode = root_inode_num;
     entry->name_len = 2;
     entry->rec_len = 12;   // 暂时设为12，后面会调整第三个目录项
@@ -639,8 +642,9 @@ int create_initial_dirs(void) {
     entry->name[1] = '.';
 
     // 目录项 "lost+found" (inode 11)
-    entry = (struct ext2_dir_entry *)(data_buf + 24);
+    entry = (struct ext2_dir_entry_2 *)(data_buf + 24);
     entry->inode = lostfound_inode_num;
+    entry->file_type = DT_DIR;
     entry->name_len = 10;
     // 计算 rec_len：从当前偏移到块尾的距离
     entry->rec_len = block_size - 24;
