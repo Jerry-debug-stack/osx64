@@ -22,15 +22,14 @@
 #define O_NOFOLLOW 00400000 /* 不跟随符号链接 */
 #define O_CLOEXEC 02000000 /* 执行时关闭 */
 
-#define DT_UNKNOWN 0 /* Unknown file type */
-#define DT_FIFO 1 /* Named pipe */
-#define DT_CHR 3 /* Character device */
-#define DT_DIR 2 /* Directory */
-#define DT_BLK 4 /* Block device */
-#define DT_REG 8 /* Regular file */
-#define DT_LNK 10 /* Symbolic link */
-#define DT_SOCK 12 /* Unix domain socket */
-#define DT_WHT 14 /* Whiteout */
+#define DT_UNKNOWN  0
+#define DT_REG      1   // 普通文件
+#define DT_DIR      2   // 目录
+#define DT_CHR      3   // 字符设备
+#define DT_BLK      4   // 块设备
+#define DT_FIFO     5   // FIFO
+#define DT_SOCK     6   // 套接字
+#define DT_LNK      7   // 符号链接
 
 /* 文件类型（已在之前定义） */
 #define S_IFMT   0170000

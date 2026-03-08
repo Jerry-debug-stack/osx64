@@ -38,6 +38,8 @@ static int bash_exit(UNUSED char* argv[], int length);
 static int bash_sync(UNUSED char* argv[], int length);
 static int bash_uuid_read(char* argv[], int length);
 static int bash_uuid_write(char* argv[], int length);
+static int bash_truncate(char* argv[], int length);
+static int bash_file_info(char* argv[], int length);
 
 static shell_function_t functions[] = {
     { "cd", bash_cd },
@@ -58,8 +60,10 @@ static shell_function_t functions[] = {
     { "whoami", bash_whoami },
     { "exit", bash_exit },
     { "sync", bash_sync },
+    { "truncate", bash_truncate },
     { "uuid_read", bash_uuid_read },
     { "uuid_write", bash_uuid_write },
+    { "file_info", bash_file_info },
     { (void*)0, (void*)0 }
 };
 
@@ -568,6 +572,73 @@ static int bash_uuid_write(char* argv[], int length){
             printf("set failed\n");
         }
         return ret;
+    }
+}
+
+static int bash_truncate(char* argv[], int length){
+    if (length != 2){
+        printf("truncate [path] [length]\n to truncate a file\n");
+        return -1;
+    } else {
+        uint64_t length;
+        if (sscanf((void *)argv[1], "%ld", &length) != 1){
+            printf("length not valid\n");
+            return -1;
+        }
+        if (truncate(argv[0], length)){
+            printf("truncate failed\n");
+            return -1;
+        } else {
+            return 0;
+        }
+    }
+}
+
+static int bash_file_info(char* argv[], int length){
+    if (length != 1){
+        printf("file_info [path]\nshow status about a file\n");
+        return -1;
+    } else {
+        stat_t stat;
+        int fd = open(argv[0], O_RDONLY, 0);
+        if (fd < 0){
+            printf("file not found:%s\n",argv[0]);
+            return -1;
+        }
+        if (fstat(fd,&stat) != 0){
+            printf("file fstat error:%s\n",argv[0]);
+            close(fd);
+            return -1;
+        }
+        printf("file :%s\nsize:%ld\nread write unit:%ldbyte(s)\n",argv[0],stat.file_size * stat.block_size,stat.block_size);
+        switch (stat.mode)
+        {
+        case DT_BLK:
+            printf("type:block device\n");
+            break;
+        case DT_CHR:
+            printf("type:character device\n");
+            break;
+        case DT_FIFO:
+            printf("type:pipe or fifo\n");
+            break;
+        case DT_LNK:
+            printf("type:link\n");
+            break;
+        case DT_REG:
+            printf("regular file\n");
+            break;
+        case DT_SOCK:
+            printf("socket file\n");
+            break;
+        case DT_DIR:
+            printf("directory\n");
+            break;
+        default:
+            printf("type:unknown\n");
+            break;
+        }
+        return 0;
     }
 }
 

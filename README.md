@@ -119,14 +119,14 @@
     - [ ] named pipe
 - [ ] signal
 - [ ] ipc
-- [ ] build an install media
+- [x] build an install media
     - [x] insights into grub
     - [x] mkfs for ext2
     - [x] dd
     - [x] cp
     - [x] uuid
         - [x] read and write for user
-    - [ ] hex editor
+    - [x] hex editor
 
 就是这样了，上面的内容应该会逐步完成(一边做一边写)  
 ***
