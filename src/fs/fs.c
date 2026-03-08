@@ -1992,3 +1992,36 @@ next:
         stat->file_size = file->inode->size;
     return 0;
 }
+
+int sys_uuid_config(char *path, char uuid[37], bool read){
+    if (!path || !uuid)
+        return -1;
+    int ret = -1;
+    write_lock(&vfs_mgr.mount_lock);
+    write_lock(&vfs_mgr.namespace_lock);
+    dentry_t *cwd = get_current()->cwd;
+    dentry_t *dev = __vfs_lookup_locked(cwd,path);
+    if (!dev)
+        goto out;
+    if (!(dev->flags & DENTRY_BLOCK_DEV))
+        goto out_put_dev;
+    partition_t *part = dev->inode->private_data;
+    if (part->device.type != BLOCK_PARTITION)
+        goto out_put_dev;
+    if (part->mounted_sb != NULL)
+        goto out_put_dev;
+    if (read){
+        if (part->uuid){
+            strcpy(uuid, part->uuid);
+            ret = 0;
+        }
+    } else{
+        ret = write_uuid(part, uuid);
+    }
+out_put_dev:
+    dentry_put(dev);
+out:
+    write_unlock(&vfs_mgr.namespace_lock);
+    write_unlock(&vfs_mgr.mount_lock);
+    return ret;
+}

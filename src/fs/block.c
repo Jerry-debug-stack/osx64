@@ -11,6 +11,7 @@
 static block_manager_t block_mgr;
 
 extern void ext2_read_uuid(partition_t *part);
+extern int ext2_write_uuid(partition_t *part, const char *uuid_str);
 
 static int block_file_open(UNUSED struct inode *inode,UNUSED struct file *file);
 static int block_file_release(UNUSED struct inode *inode,UNUSED struct file *file);
@@ -186,6 +187,31 @@ static void read_uuid(partition_t *part){
         return;
     default:
         return;
+    }
+}
+
+int write_uuid(partition_t *part, char uuid[37]){
+    char *new_uuid = kmalloc(37);
+    if (!new_uuid){
+        return -1;
+    }
+    memcpy(new_uuid, uuid, 37);
+    switch (part->part_type)
+    {
+    case PARTITION_LINUX:
+        int ret = ext2_write_uuid(part, (void *)uuid);
+        if (!ret){
+            if (part->uuid)
+                kfree(part->uuid);
+            part->uuid = new_uuid;
+            return 0;
+        }else{
+            kfree(new_uuid);
+            return ret;
+        }
+    default:
+        kfree(new_uuid);
+        return -1;
     }
 }
 

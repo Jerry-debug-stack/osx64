@@ -28,6 +28,7 @@ global reboot
 global clock_gettime
 global pipe
 global fstat
+global uuid_config
 
 section .text
     bits 64
@@ -178,5 +179,10 @@ section .text
     
     fstat:
         mov rax,29
+        int 0x80
+        ret
+
+    uuid_config:
+        mov rax,30
         int 0x80
         ret

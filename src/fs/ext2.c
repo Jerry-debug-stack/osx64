@@ -120,6 +120,69 @@ end:
     return;
 }
 
+static int uuid_from_string(const char *str, uint8_t *uuid) {
+    int i = 0, j = 0;
+    while (i < 36) {  // 36 个有效字符
+        if (str[i] == '-') {  // 跳过连字符
+            i++;
+            continue;
+        }
+        if (i + 1 >= 36) return -1;  // 不足两个十六进制字符
+
+        // 转换两个十六进制字符为一个字节
+        uint8_t high, low;
+        char c = str[i];
+        if (c >= '0' && c <= '9') high = c - '0';
+        else if (c >= 'a' && c <= 'f') high = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') high = c - 'A' + 10;
+        else return -1;
+
+        c = str[i+1];
+        if (c >= '0' && c <= '9') low = c - '0';
+        else if (c >= 'a' && c <= 'f') low = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') low = c - 'A' + 10;
+        else return -1;
+
+        uuid[j++] = (high << 4) | low;
+        i += 2;
+    }
+    return (j == 16) ? 0 : -1;  // 必须正好生成 16 字节
+}
+
+int ext2_write_uuid(partition_t *part, const char *uuid_str) {
+    uint8_t *buf = kmalloc(1024);
+    if (!buf) return -1;
+
+    // 读取超级块（块大小为512字节，超级块位于块2，占用2块）
+    if (!partition_read(&part->device, 2, 2, buf)) {
+        kfree(buf);
+        return -1;
+    }
+
+    // 验证是否为 ext2 超级块
+    uint16_t magic = *(uint16_t *)(buf + EXT2_MAGIC_OFFSET);
+    if (magic != EXT2_SUPER_MAGIC) {
+        kfree(buf);
+        return -1;
+    }
+
+    // 将字符串转换为二进制 UUID
+    uint8_t new_uuid[16];
+    if (uuid_from_string(uuid_str, new_uuid) != 0) {
+        kfree(buf);  // 格式错误，不写入
+        return -1;
+    }
+
+    // 更新缓冲区中的 UUID 字段
+    memcpy(buf + EXT2_UUID_OFFSET, new_uuid, 16);
+
+    // 将修改后的超级块写回磁盘
+    partition_write(&part->device, 2, 2, buf);
+
+    kfree(buf);
+    return 0;
+}
+
 
 static inode_t *ext2_read_root_inode(struct super_block *sb){
     if (!sb || !sb->part)

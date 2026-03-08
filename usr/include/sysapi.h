@@ -57,5 +57,6 @@ int reboot(int cmd);
 void clock_gettime(utimespec_t *u);
 int pipe(int pipe[2]);
 int fstat(int fd, stat_t *stat);
+int uuid_config(char *path, char uuid[37], bool read);
 
 #endif

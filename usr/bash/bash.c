@@ -36,6 +36,8 @@ static int bash_poweroff(UNUSED char* argv[], int length);
 static int bash_whoami(UNUSED char* argv[], int length);
 static int bash_exit(UNUSED char* argv[], int length);
 static int bash_sync(UNUSED char* argv[], int length);
+static int bash_uuid_read(char* argv[], int length);
+static int bash_uuid_write(char* argv[], int length);
 
 static shell_function_t functions[] = {
     { "cd", bash_cd },
@@ -56,6 +58,8 @@ static shell_function_t functions[] = {
     { "whoami", bash_whoami },
     { "exit", bash_exit },
     { "sync", bash_sync },
+    { "uuid_read", bash_uuid_read },
+    { "uuid_write", bash_uuid_write },
     { (void*)0, (void*)0 }
 };
 
@@ -534,6 +538,37 @@ static int bash_exit(UNUSED char* argv[], int length)
         printf("exit\nexit this bash\n");
     }
     return -1;
+}
+
+static int bash_uuid_read(char* argv[], int length){
+    if (length != 1){
+        printf("uuid_read [path]\nto read the uuid\n");
+        return -1;
+    } else {
+        char temp[37];
+        int ret = uuid_config(argv[0],temp,true);
+        if (!ret){
+            printf("read %s,UUID:%s\n",argv[0],temp);
+        } else {
+            printf("UUID read failed");
+        }
+        return ret;
+    }
+}
+
+static int bash_uuid_write(char* argv[], int length){
+    if (length != 2){
+        printf("uuid_config [path] [new_uuid]\nto set the uuid\n");
+        return -1;
+    } else {
+        int ret = uuid_config(argv[0],argv[1],true);
+        if (!ret){
+            printf("successfully set %s,UUID:%s\n",argv[0],argv[1]);
+        }else{
+            printf("set failed\n");
+        }
+        return ret;
+    }
 }
 
 // 判断字符是否为空白字符

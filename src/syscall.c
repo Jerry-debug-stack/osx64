@@ -31,6 +31,7 @@ int sys_reboot(int cmd);
 void sys_clock_gettime(void *addr);
 int sys_pipe(int pipe[2]);
 int sys_fstat(int fd, stat_t *stat);
+int sys_uuid_config(char *path, char uuid[37], bool read);
 
 void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_time,
@@ -63,4 +64,5 @@ void *syscall_table[MAX_SYSCALL_NUM] = {
     sys_clock_gettime,
     sys_pipe,
     sys_fstat,
+    sys_uuid_config,
 };

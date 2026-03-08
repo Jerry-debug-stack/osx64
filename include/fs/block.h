@@ -83,5 +83,6 @@ typedef struct {
 
 int partition_read(block_device_t *dev,uint64_t lba,uint32_t cnt,void *buf);
 int partition_write(block_device_t *dev,uint64_t lba,uint32_t cnt,const void *buf);
+int write_uuid(partition_t *part, char uuid[37]);
 
 #endif
