@@ -148,6 +148,12 @@ typedef struct vfs_manager {
     dentry_t *root;
 } vfs_manager_t;
 
+typedef struct stat {
+    uint64_t block_size;
+    uint64_t file_size;
+    uint32_t mode;
+} stat_t;
+
 static inline void dentry_get(dentry_t *d)
 {
     atomic_inc(&d->refcount);

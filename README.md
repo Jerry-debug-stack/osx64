@@ -122,7 +122,8 @@
 - [ ] build an install media
     - [x] insights into grub
     - [x] mkfs for ext2
-    - [ ] dd
+    - [x] dd
+    - [ ] cp
     - [ ] uuid
         - [ ] read and write for user
 

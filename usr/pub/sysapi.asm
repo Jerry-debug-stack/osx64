@@ -27,6 +27,7 @@ global execv
 global reboot
 global clock_gettime
 global pipe
+global fstat
 
 section .text
     bits 64
@@ -172,5 +173,10 @@ section .text
     
     pipe:
         mov rax,28
+        int 0x80
+        ret
+    
+    fstat:
+        mov rax,29
         int 0x80
         ret

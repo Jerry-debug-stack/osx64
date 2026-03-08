@@ -1961,3 +1961,34 @@ int sys_sync(void){
     write_unlock(&vfs_mgr.mount_lock);
     return 0;
 }
+
+int sys_fstat(int fd, stat_t *stat){
+    pcb_t *current = get_current();
+    file_t *file = fd_get(current, fd);
+    if (!file)
+        return -1;
+    stat->block_size = 1;
+    if (file->dentry){
+        if (file->dentry->flags & DENTRY_BLOCK_DEV){
+            stat->block_size = 512;
+            stat->mode = DT_BLK;
+            goto next;
+        }else if (file->dentry->flags & DENTRY_CHARACTER_DEV){
+            stat->mode = DT_CHR;
+            goto next;
+        }else if (file->dentry->flags & DENTRY_BLOCK_ROOT){
+            stat->mode = DT_DIR;
+            goto next;
+        }
+    }
+    if (file->inode){
+        stat->mode = S_ISDIR(file->inode->mode) ? DT_DIR : DT_REG;
+    }else{
+        stat->mode = DT_REG;
+    }
+next:
+    stat->file_size = 0;
+    if (file->inode)
+        stat->file_size = file->inode->size;
+    return 0;
+}

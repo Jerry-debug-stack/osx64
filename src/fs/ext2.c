@@ -1243,7 +1243,7 @@ static int ext2_write_inode(struct super_block *sb, uint32_t ino, struct ext2_in
 
 static inline uint16_t EXT2_DIR_REC_LEN(uint16_t name_len)
 {
-    uint16_t len = offsetof(struct ext2_dir_entry_2, name) + name_len + 1; // +1 for null? ext2不存储null，但为了对齐计算
+    uint16_t len = offsetof(struct ext2_dir_entry_2, name) + name_len;
     // ext2 实际存储没有null，但目录项长度需要4字节对齐
     len = (len + 3) & ~3;
     return len;
@@ -1274,8 +1274,9 @@ static int ext2_dir_add_entry(struct inode *dir, const char *name, uint32_t ino,
         uint32_t offset = 0;
         while (offset < block_size) {
             struct ext2_dir_entry_2 *de = (struct ext2_dir_entry_2 *)(block_buf + offset);
-            uint16_t min_len = EXT2_DIR_REC_LEN(de->name_len); // 该目录项实际需要的最小长度
-            uint16_t free_space = de->rec_len - min_len;       // 内部空闲空间
+            int16_t min_len = (int16_t)EXT2_DIR_REC_LEN(de->name_len); // 该目录项实际需要的最小长度
+            int16_t free_space = (int16_t)de->rec_len - min_len;       // 内部空闲空间
+            // 虽然正常情况下并不会出现min_len比rec_len大的情况,但是防御性地,还是用int,防止溢出
 
             // 如果该目录项已被删除 (inode == 0)，整个项都是空闲的
             if (de->inode == 0) {
@@ -1293,14 +1294,14 @@ static int ext2_dir_add_entry(struct inode *dir, const char *name, uint32_t ino,
                     return 0;
                 }
             } else {
-                if (free_space >= rec_len) {
+                if (free_space >= (int16_t)rec_len) {
                     // 在当前目录项内部插入新项
                     // 分裂：将当前项的 rec_len 减少，在尾部创建新项
                     uint16_t new_rec_len = min_len; // 当前项缩小到实际大小
                     // 新项放在当前项之后
                     struct ext2_dir_entry_2 *new_de = (struct ext2_dir_entry_2 *)((char *)de + new_rec_len);
                     new_de->inode = ino;
-                    new_de->rec_len = free_space; // 新项占用剩余空间
+                    new_de->rec_len = (uint16_t)free_space; // 新项占用剩余空间
                     new_de->name_len = name_len;
                     new_de->file_type = file_type;
                     memcpy(new_de->name, (void*)name, name_len);

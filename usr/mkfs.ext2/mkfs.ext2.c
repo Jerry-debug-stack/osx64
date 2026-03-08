@@ -29,8 +29,10 @@ struct ext2_params {
     uint32_t lostfound_block;
 } g_params;
 
-int64_t part_sector_cnt;
-int fd;
+static int64_t part_sector_cnt;
+static int fd;
+static bool is_norm;
+static uint64_t rw_one_block;
 
 static uint64_t xorshift64(uint64_t *seed) {
     uint64_t x = *seed;
@@ -106,14 +108,21 @@ static void get_block_size(void){
                 if (g_params.block_size == 1024){
                     if (part_sector_cnt > (int64_t)EXT2_1024_MAX_SECTOR_COUNT){
                         printf("block size 1024 is too small for the part\n");
-                    }else break;
+                    }else {
+                        rw_one_block = is_norm ? 1024 : 2;
+                        break;
+                    }
                 }else if (g_params.block_size == 2048)
                 {
                     if (part_sector_cnt > (int64_t)EXT2_2048_MAX_SECTOR_COUNT){
                         printf("block size 2048 is too small for the part\n");
-                    }else break;
+                    }else{
+                        rw_one_block = is_norm ? 2048 : 4;
+                        break;
+                    }
                 }else if (g_params.block_size == 4096)
                 {
+                    rw_one_block = is_norm ? 4096 : 8;
                     break;
                 }else{
                     printf("Unsupported block size.\n");
@@ -271,15 +280,15 @@ static int write_superblock(void) {
     // 其他字段默认为0
 
     // 计算设备偏移量（字节）
-    off_t offset = 2;
+    off_t offset = rw_one_block * 2;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to superblock\n");
         free(sb_buf);
         return -1;
     }
 
-    ssize_t written = write(fd, (void *)sb_buf, 2);
-    if (written != 2) {
+    ssize_t written = write(fd, (void *)sb_buf, rw_one_block * 2);
+    if (written != (ssize_t)rw_one_block * 2) {
         printf("Failed to write superblock (wrote %ld)\n", written);
         free(sb_buf);
         return -1;
@@ -366,15 +375,15 @@ static int write_group_descriptors(void) {
     }
 
     // 将 GDT 写入设备（注意：偏移量为字节）
-    off_t offset = (off_t)gdt_start_block * block_size / 512;
+    off_t offset = (off_t)gdt_start_block * rw_one_block;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to GDT start\n");
         free(buf);
         return -1;
     }
 
-    ssize_t written = write(fd, (void *)buf, buf_size / 512);
-    if (written != (ssize_t)buf_size / 512) {
+    ssize_t written = write(fd, (void *)buf, rw_one_block);
+    if (written != (ssize_t)rw_one_block) {
         printf("Failed to write GDT (wrote %ld)\n", written);
         free(buf);
         return -1;
@@ -437,14 +446,14 @@ static int init_block_bitmap(void) {
         #undef SET_BIT
 
         // 块位图所在的绝对块号
-        off_t offset = (off_t)(group_start_abs + rel_bitmap) * block_size / 512;
+        off_t offset = (off_t)(group_start_abs + rel_bitmap) * rw_one_block;
         if (lseek(fd, offset, SEEK_SET) != offset) {
             printf("Failed to seek to block bitmap of group %u\n", group);
             free(bitmap_buf);
             return -1;
         }
-        ssize_t written = write(fd, (void *)bitmap_buf, block_size / 512);
-        if (written != (ssize_t)block_size / 512) {
+        ssize_t written = write(fd, (void *)bitmap_buf, rw_one_block);
+        if (written != (ssize_t)rw_one_block) {
             printf("Failed to write block bitmap of group %u\n", group);
             free(bitmap_buf);
             return -1;
@@ -500,14 +509,14 @@ static int init_inode_bitmap(void) {
         }
 
         // 写入设备
-        off_t offset = (off_t)bitmap_block * block_size / 512;
+        off_t offset = (off_t)bitmap_block * rw_one_block;
         if (lseek(fd, offset, SEEK_SET) != offset) {
             printf("Failed to seek to inode bitmap of group %u\n", group);
             free(bitmap_buf);
             return -1;
         }
-        ssize_t written = write(fd, (void *)bitmap_buf, block_size / 512);
-        if (written != (ssize_t)block_size / 512) {
+        ssize_t written = write(fd, (void *)bitmap_buf, rw_one_block);
+        if (written != (ssize_t)rw_one_block) {
             printf("Failed to write inode bitmap of group %u\n", group);
             free(bitmap_buf);
             return -1;
@@ -546,14 +555,14 @@ static int init_inode_tables(void) {
         // 写入 inode_table_blocks 个块，全部填零
         for (uint32_t i = 0; i < inode_table_blocks; i++) {
             uint32_t block_num = inode_table_start + i;
-            off_t offset = (off_t)block_num * block_size / 512;
+            off_t offset = (off_t)block_num * rw_one_block;
             if (lseek(fd, offset, SEEK_SET) != offset) {
                 printf("Failed to seek to inode table block %u in group %u\n", block_num, group);
                 free(zero_buf);
                 return -1;
             }
-            ssize_t written = write(fd, (void *)zero_buf, block_size / 512);
-            if (written != (ssize_t)block_size / 512) {
+            ssize_t written = write(fd, (void *)zero_buf, rw_one_block);
+            if (written != (ssize_t)rw_one_block) {
                 printf("Failed to write zero to inode table block %u\n", block_num);
                 free(zero_buf);
                 return -1;
@@ -598,14 +607,14 @@ int create_initial_dirs(void) {
     entry->name[1] = '.';
 
     // 写入数据块
-    off_t offset = (off_t)lostfound_block * block_size / 512;
+    off_t offset = (off_t)lostfound_block * rw_one_block;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to lost+found data block\n");
         free(data_buf);
         return -1;
     }
-    ssize_t written = write(fd, (void *)data_buf, block_size / 512);
-    if (written != (ssize_t)block_size / 512) {
+    ssize_t written = write(fd, (void *)data_buf, rw_one_block);
+    if (written != (ssize_t)rw_one_block) {
         printf("Failed to write lost+found directory data block\n");
         free(data_buf);
         return -1;
@@ -638,14 +647,14 @@ int create_initial_dirs(void) {
     memcpy(entry->name, "lost+found", 10);
 
     // 写入根目录数据块
-    offset = (off_t)root_dir_block * block_size / 512;
+    offset = (off_t)root_dir_block * rw_one_block;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to root dir data block\n");
         free(data_buf);
         return -1;
     }
-    written = write(fd, (void *)data_buf, block_size / 512);
-    if (written != (ssize_t)block_size / 512) {
+    written = write(fd, (void *)data_buf, rw_one_block);
+    if (written != (ssize_t)rw_one_block) {
         printf("Failed to write root dir directory data block\n");
         free(data_buf);
         return -1;
@@ -668,13 +677,13 @@ int create_initial_dirs(void) {
     }
 
     // 读取 inode 表块
-    offset = (off_t)target_block * block_size / 512;
+    offset = (off_t)target_block * rw_one_block;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to inode table block\n");
         free(inode_buf);
         return -1;
     }
-    if (read(fd, (void *)inode_buf, block_size / 512) != (ssize_t)block_size / 512) {
+    if (read(fd, (void *)inode_buf, rw_one_block) != (ssize_t)rw_one_block) {
         printf("Failed to read inode table block\n");
         free(inode_buf);
         return -1;
@@ -687,7 +696,7 @@ int create_initial_dirs(void) {
     inode->i_uid = 0;
     inode->i_size = block_size;
     inode->i_links_count = 3;
-    inode->i_blocks = block_size / 512;
+    inode->i_blocks = rw_one_block;
     inode->i_block[0] = root_dir_block;
     inode->i_atime = inode->i_ctime = inode->i_mtime = time();
     // 其他字段保持0
@@ -698,7 +707,7 @@ int create_initial_dirs(void) {
         free(inode_buf);
         return -1;
     }
-    if (write(fd, (void *)inode_buf, block_size / 512) != (ssize_t)block_size / 512) {
+    if (write(fd, (void *)inode_buf, rw_one_block) != (ssize_t)rw_one_block) {
         printf("Failed to write inode table block\n");
         free(inode_buf);
         return -1;
@@ -710,13 +719,13 @@ int create_initial_dirs(void) {
     target_block = inode_table_start + (inode_offset / block_size);
     offset_in_block = inode_offset % block_size;
 
-    offset = (off_t)target_block * block_size / 512;
+    offset = (off_t)target_block * rw_one_block;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         printf("Failed to seek to inode table block\n");
         free(inode_buf);
         return -1;
     }
-    if (read(fd, (void *)inode_buf, block_size / 512) != (ssize_t)block_size / 512) {
+    if (read(fd, (void *)inode_buf, rw_one_block) != (ssize_t)rw_one_block) {
         printf("Failed to read inode table block\n");
         free(inode_buf);
         return -1;
@@ -728,7 +737,7 @@ int create_initial_dirs(void) {
     inode->i_uid = 0;
     inode->i_size = block_size;
     inode->i_links_count = 2;         // "." 和 ".."
-    inode->i_blocks = block_size / 512;
+    inode->i_blocks = rw_one_block;
     inode->i_block[0] = lostfound_block;
     inode->i_ctime = inode->i_mtime = inode->i_atime = time();
 
@@ -738,7 +747,7 @@ int create_initial_dirs(void) {
         free(inode_buf);
         return -1;
     }
-    if (write(fd, (void *)inode_buf, block_size / 512) != (ssize_t)block_size / 512) {
+    if (write(fd, (void *)inode_buf, rw_one_block) != (ssize_t)rw_one_block) {
         printf("Failed to write inode table block\n");
         free(inode_buf);
         return -1;
@@ -789,6 +798,21 @@ int main(char *argv[]) {
         printf("Failed to get device size\n");
         close(fd);
         exit(1);
+    }
+
+    stat_t stat;
+    if (fstat(fd,&stat)){
+        printf("fstat failed\n");
+        close(fd);
+        exit(1);
+    }
+    if (stat.block_size == 1){
+        printf("open a normal file\n");
+        part_sector_cnt /= 512;
+        is_norm = true;
+    }else{
+        printf("open a partition\n");
+        is_norm = false;
     }
 
     if (part_sector_cnt > (int64_t)EXT2_4096_MAX_SECTOR_COUNT){

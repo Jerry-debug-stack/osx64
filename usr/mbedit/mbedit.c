@@ -23,9 +23,11 @@ typedef struct {
     unsigned int  sectors;        // 扇区数（小端）
 } __attribute__((packed)) partition_t;
 
+static uint64_t rw_size;
+
 static int read_mbr(int fd, unsigned char *mbr, partition_t *parts) {
     if (lseek(fd, 0, 0) != 0) return -1;
-    if (read(fd, (void *)mbr, 1) != 1) return -1;
+    if (read(fd, (void *)mbr, rw_size) != 1) return -1;
 
     unsigned short sig = *(unsigned short*)(mbr + MBR_SIGN_OFFSET);
     if (sig != MBR_SIGNATURE) return -2;
@@ -49,7 +51,7 @@ static int write_mbr(int fd, unsigned char *mbr, partition_t *parts) {
         *(unsigned int*)(p + 12) = parts[i].sectors;
     }
     if (lseek(fd, 0, 0) != 0) return -1;
-    if (write(fd, (void *)mbr, 1) != 1) return -1;
+    if (write(fd, (void *)mbr, rw_size) != 1) return -1;
     return 0;
 }
 
@@ -98,6 +100,21 @@ int main(char *argv[]) {
         printf("Cannot open %s\n", dev);
         exit(1);
     }
+    
+    stat_t stat;
+    if (fstat(fd,&stat)){
+        printf("fstat failed\n");
+        exit(1);
+    }
+
+    if (stat.block_size == 1){
+        printf("A normal file opened\n");
+        rw_size = 512;
+    }else{
+        printf("A disk opened\n");
+        rw_size = 1;
+    }
+
 
     uint8_t *mbr = (uint8_t*)malloc(SECTOR_SIZE);
     if (!mbr) {

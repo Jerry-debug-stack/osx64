@@ -21,6 +21,12 @@ typedef struct utimespec {
     uint64_t   tv_nsec; // 纳秒
 } utimespec_t;
 
+typedef struct stat {
+    uint64_t block_size;
+    uint64_t file_size;
+    uint32_t mode;
+} stat_t;
+
 uint32_t time(void);
 int open(const char *path, int flags, int mode);
 ssize_t read(int fd, char *buf, size_t count);
@@ -50,5 +56,6 @@ int execv(const char* path, char* const argv[]);
 int reboot(int cmd);
 void clock_gettime(utimespec_t *u);
 int pipe(int pipe[2]);
+int fstat(int fd, stat_t *stat);
 
 #endif
