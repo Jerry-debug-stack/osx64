@@ -121,7 +121,7 @@
 - [ ] ipc
 - [ ] build an install media
     - [x] insights into grub
-    - [ ] mkfs for ext2
+    - [x] mkfs for ext2
     - [ ] dd
     - [ ] uuid
         - [ ] read and write for user
