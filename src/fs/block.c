@@ -390,9 +390,11 @@ void mount_root(void){
     }
     if (!target){
         color_printf("[ PANIC ] root uuid(%s) not found!!!\n",VIEW_COLOR_RED,VIEW_COLOR_WHITE,rootuuid);
+        halt();
     }else{
         if (vfs_mount(target,"/root",0)){
             color_printf("[ PANIC ] mount root uuid(%s) failed!!!\n",VIEW_COLOR_RED,VIEW_COLOR_WHITE,rootuuid);
+            halt();
         }else{
             wb_printf("[  VFS  ] root mount successfully (uuid %s)\n",rootuuid);
         }

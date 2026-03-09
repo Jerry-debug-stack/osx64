@@ -127,8 +127,8 @@ static void sh_start(char *std_name){
         sys_close(fd);
     }
     char *argv[] = {NULL,NULL};
-    sys_execv("/root/bash",argv);
-    wb_printf("open bash.elf failed!!\n");
+    sys_execv("/root/os/bash",argv);
+    wb_printf("open /root/os/bash failed!!\n");
     while (1){}
     sys_exit(-1);
 }

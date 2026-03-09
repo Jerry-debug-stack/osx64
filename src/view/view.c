@@ -5,8 +5,16 @@
 #include "multiboot.h"
 #include "view/font.h"
 
-#define SCREEN_WIDTH 1280
-#define SCREEN_HEIGHT 720
+#define HARDWARE
+
+#ifdef HARDWARE
+    #define SCREEN_WIDTH  800
+    #define SCREEN_HEIGHT 600
+#else
+    #define SCREEN_WIDTH  1280
+    #define SCREEN_HEIGHT 720
+#endif
+
 #define CHAR_X 8
 #define CHAR_Y 16
 #define MAX_ROWS (SCREEN_HEIGHT / CHAR_Y)

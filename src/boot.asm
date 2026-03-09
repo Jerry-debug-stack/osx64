@@ -38,8 +38,10 @@ section .multiboot
     bss_end_addr: dd 0
     entry_addr:dd 0
     mode_type:dd 0
-    width:dd 1280
-    height: dd 720
+    ;width:dd 1280
+    ;height: dd 720
+    width:dd 800
+    height:dd 600
     depth:dd 32
 section .text32
     bits 32
@@ -607,6 +609,9 @@ section .apboot16
         mov gs,ax
         mov ss,ax
         mov sp,0x1000
+        in  al,0x92
+        or  al,2
+        out 0x92,al
         mov edi,gdtr_addr
         sub edi,ap_enter
         add edi,0x10000

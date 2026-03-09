@@ -76,7 +76,8 @@ $(img): $(target)
 # 最终目标：编译内核和所有用户程序，并复制到挂载点
 all: $(target_elf) $(USER_ELFS) $(target) $(img)
 	sudo mount /dev/loop1p1 /mnt/osdev
-	for elf in $(USER_ELFS); do sudo cp $$elf /mnt/osdev/; done
+	sudo mkdir -p /mnt/osdev/os
+	for elf in $(USER_ELFS); do sudo cp $$elf /mnt/osdev/os/; done
 	sudo umount /mnt/osdev
 
 clean:

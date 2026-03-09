@@ -149,12 +149,12 @@ static void broadcast_ipi_startup(void)
 }
 
 extern uint8_t ap_code_data_start[];
-uint32_t ap_startup_lock;
-uint32_t ap_startup_count;
-uint32_t ap_ready_num;
+volatile uint32_t ap_startup_lock;
+volatile uint32_t ap_ready_num;
 extern uint64_t *vir_ptable4;
 
 void init_ap(void){
+    ap_ready_num = 0;
     memcpy(easy_phy2linear(PHYSIC_ADDR_AP_CODE_DATA),ap_code_data_start,512);
     broadcast_ipi_init();
     for (uint32_t i = 0; i < 100000; i++)
@@ -162,6 +162,7 @@ void init_ap(void){
         __asm__ __volatile__("nop");
     }
     ap_startup_lock = 0;
+    asm volatile("wbinvd" ::: "memory");
     broadcast_ipi_startup();
     while(cpus->total_num > ap_ready_num + 1) __asm__ __volatile__("pause");
     wb_printf("[BspCore] All AP start up finished!\n");

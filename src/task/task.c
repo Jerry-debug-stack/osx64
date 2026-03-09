@@ -42,7 +42,7 @@ void init_task(void)
         item->total_ready_num = 0;
         pcb_t *pcb_of_idle = put_thread("idle",idle,NULL,true,NULL);
         item->idle = pcb_of_idle;
-        item->now_running = NULL;
+        item->now_running = pcb_of_idle;
     }
     /* 初始化init进程 */
     pcb_of_init = kernel_thread("init",init,NULL,-1,NULL);

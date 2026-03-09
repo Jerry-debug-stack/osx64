@@ -2,7 +2,8 @@
 #define OS_CONST_H
 #include <stdint.h>
 
-#define CLOCK_FREQ      5000
+// #define CLOCK_FREQ      5000
+#define CLOCK_FREQ      500
 #define DEFUALT_TICKS   10
 
 #define VIRTUAL_ADDR_0 0xffff800000000000
