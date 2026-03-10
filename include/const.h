@@ -5,6 +5,7 @@
 // #define CLOCK_FREQ      5000
 #define CLOCK_FREQ      500
 #define DEFUALT_TICKS   10
+#define RELOAD_TICKS (1193182 / CLOCK_FREQ)
 
 #define VIRTUAL_ADDR_0 0xffff800000000000
 #define PHYSIC_ADDR_AP_CODE_DATA       0x10000

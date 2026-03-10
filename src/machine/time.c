@@ -4,8 +4,7 @@
 #include "machine/cpu.h"
 #include "mm/mm.h"
 #include "lib/atomic.h"
-
-#define RELOAD_TICKS (1193182 / CLOCK_FREQ)
+#include "view/view.h"
 
 extern GLOBAL_CPU *cpus;
 
@@ -25,18 +24,18 @@ void timer_intr_soft(void);
 static inline uint32_t local_timer_timeout(CPU_ITEM *cpu);
 static void add_timer(enum timer_type_enum timer_type,uint64_t first_ticks,uint32_t delta_ticks,pcb_t *task,uint32_t signal);
 static void load_balance(uint32_t id);
-static void init_8254(void);
 
 void init_time(void)
 {
     ticks = 0;
-    if (hpet_base){
-        if (init_hpet_timer()){
-            init_8254();
-        }
-    else{
-        init_8254();
-    }}
+    if (!hpet_base){
+        wb_printf("[ ERROR ] hpet not found!!\n");
+        halt();
+    }
+    if (init_hpet_timer() < 0){
+        wb_printf("[ ERROR ] hpet init failed!!\n");
+        halt();
+    }
 
     for (uint32_t i = 0; i < cpus->total_num; i++)
     {
@@ -48,12 +47,6 @@ void init_time(void)
     /* 设置AP核对中断的处理程序 */
     set_handler(2, (uint64_t)timer_intr_soft);
     enable_irq(2);
-}
-
-static void init_8254(void){
-    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x43), "al"(0x34) :);
-    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x40), "al"((RELOAD_TICKS) & 0xFF) :);
-    __asm__ __volatile__("movw %0,%%dx;outb %%al,%%dx;" ::"i"(0x40), "al"((RELOAD_TICKS) >> 8) :);
 }
 
 void timer_intr_soft(void){

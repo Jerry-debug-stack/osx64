@@ -29,13 +29,6 @@ static void ahci_register_device(hba_mem_t *hba, int port_no)
     d->hba = hba;
     d->port = &hba->ports[port_no];
     d->port_no = port_no;
-    
-    ahci_send(&hba->ports[port_no], 0, 1, &d->identify, COMMAND_IDENTIFY, 0, (uint64_t)vir_ptable4);
-    while (1) {
-        if ((hba->ports[port_no].ci & 1) == 0)
-            break;
-    }
-
     spin_lock_init(&d->lock);
     INIT_LIST_HEAD(&d->req_queue);
     for (uint32_t i = 0; i < 32; i++)
@@ -45,6 +38,11 @@ static void ahci_register_device(hba_mem_t *hba, int port_no)
 
     ahci_mgr.count++;
     init_command_fis_list(hba,port_no);
+    ahci_send(&hba->ports[port_no], 0, 1, &d->identify, COMMAND_IDENTIFY, 0, (uint64_t)vir_ptable4);
+    while (1) {
+        if ((hba->ports[port_no].ci & 1) == 0)
+            break;
+    }
     wb_printf("[ AHCI  ] registered device at port %d\n", port_no);
     ahci_register_block_device(d);
 }

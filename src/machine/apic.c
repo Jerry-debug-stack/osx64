@@ -22,8 +22,20 @@ static uint64_t read_io_apic(uint64_t Register);
 
 uint64_t intr_handler[24];
 
+static uint32_t* get_local_apic_address(void) {
+    uint64_t msr_value;
+    uint64_t phys_addr;
+    asm volatile("rdmsr" : "=A" (msr_value) : "c" (MSR_IA32_APIC_BASE));
+    if (!(msr_value & (1 << 11))) {
+        phys_addr = PHYSIC_ADDR_LOCAL_APIC;
+    } else {
+        phys_addr = msr_value & APIC_BASE_MASK;
+    }
+    return (uint32_t*)easy_phy2linear(phys_addr);
+}
+
 void init_apic_ap(){
-    LocalAPIC = (uint32_t*)easy_phy2linear(PHYSIC_ADDR_LOCAL_APIC);
+    LocalAPIC = get_local_apic_address();
     uint32_t a, b, c, d;
     /* Local APIC */
     __asm__ __volatile__("cpuid;" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "0"(0), "2"(1));
@@ -126,25 +138,28 @@ uint32_t get_apic_id()
     return (LocalAPIC[LocalAPICId] >> 24); /// 这是APIC
 }
 
-///// @brief 向其他处理器发送IPI信息
-///// @param InterruptVector 中断向量号
-//static void broadcast_ipi_no_self(uint8_t InterruptVector)
-//{
-//    LocalAPIC[ICRbit63to32] = 0;
-//    LocalAPIC[ICRbit31to0] = (0x3 << 18) | (0x1 << 14) | InterruptVector;
-//}
-//
-
-/// @brief 向其他处理器发送IPI INIT信息
-static void broadcast_ipi_init(void)
+static void lapic_wait_icr(void)
 {
-    LocalAPIC[ICRbit31to0] = 0xc4500;
+    while (LocalAPIC[ICRbit31to0] & (1 << 12))
+        __asm__ volatile("pause");
 }
 
-/// @brief 启动其他处理器
-/// @param StartUpPhyAddr 地址，需要是0xmn000的形式，这时0xmn为interruptvector
+static void broadcast_ipi_init(void)
+{
+    LocalAPIC[ICRbit63to32] = 0;
+    LocalAPIC[ICRbit31to0] = 0xc4500;
+    lapic_wait_icr();
+}
+
+static void broadcast_ipt_init_deassert(void){
+    LocalAPIC[ICRbit63to32] = 0;
+    LocalAPIC[ICRbit31to0] = 0xc4400;
+    lapic_wait_icr();
+}
+
 static void broadcast_ipi_startup(void)
 {
+    LocalAPIC[ICRbit63to32] = 0;
     LocalAPIC[ICRbit31to0] = 0xc4600 | (PHYSIC_ADDR_AP_CODE_DATA >> 12);
 }
 
@@ -153,16 +168,19 @@ volatile uint32_t ap_startup_lock;
 volatile uint32_t ap_ready_num;
 extern uint64_t *vir_ptable4;
 
+#include "lib/timer.h"
+
 void init_ap(void){
     ap_ready_num = 0;
     memcpy(easy_phy2linear(PHYSIC_ADDR_AP_CODE_DATA),ap_code_data_start,512);
     broadcast_ipi_init();
-    for (uint32_t i = 0; i < 100000; i++)
-    {
-        __asm__ __volatile__("nop");
-    }
+    hpet_udelay(10000);
+    broadcast_ipt_init_deassert();
+    __asm__ __volatile__("mfence" ::: "memory");
+    broadcast_ipi_startup();
+    hpet_udelay(200);
     ap_startup_lock = 0;
-    asm volatile("wbinvd" ::: "memory");
+    __asm__ __volatile__("mfence" ::: "memory");
     broadcast_ipi_startup();
     while(cpus->total_num > ap_ready_num + 1) __asm__ __volatile__("pause");
     wb_printf("[BspCore] All AP start up finished!\n");

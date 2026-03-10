@@ -35,6 +35,7 @@
 #define HPET_TN_TYPE_LEVEL      (1ULL << 1)  // 电平触发 (0=边沿)
 
 uint64_t hpet_base = 0;
+uint64_t hpet_frequency_hz;
 
 // --- HPET 读写辅助函数 (假设内存映射) ---
 static inline uint64_t hpet_read(int reg) {
@@ -92,25 +93,30 @@ int init_hpet_timer(void) {
     }
     
     // 计算 HPET 计数器频率（Hz）
-    uint64_t hpet_frequency_hz = 1000000000000000ULL / period_fs;  // 10^15 / period_fs
+    hpet_frequency_hz = 1000000000000000ULL / period_fs;  // 10^15 / period_fs
     
     // 计算所需的计数器周期数（计数器增量）
     // 使用四舍五入： (hpet_frequency_hz + TARGET_FREQ_HZ/2) / TARGET_FREQ_HZ
     uint64_t period_ticks = (hpet_frequency_hz + CLOCK_FREQ / 2) / CLOCK_FREQ;
     
     // 可选：打印调试信息
-    wb_printf("[HPET] Frequency: %lu Hz, period_ticks for %lu Hz: %lu\n",hpet_frequency_hz, CLOCK_FREQ, period_ticks);
+    wb_printf("[ HPET  ] Frequency: %lu Hz, period_ticks for %lu Hz: %lu\n",hpet_frequency_hz, CLOCK_FREQ, period_ticks);
     
     // 设置定时器0的比较器值和周期值（替换原有的 RELOAD_TICKS_100HZ）
     hpet_write(TIMER0_COMPARATOR, period_ticks);
     
     // 6. 启用HPET主计数器
     uint64_t main_conf = HPET_CONF_ENABLE;
-    
-    // 如果需要Legacy Replacement模式，设置LEG_RT位
-    // 这会使定时器0使用IRQ2，定时器1使用IRQ8
-    main_conf |= HPET_CONF_LEG_RT;
-    
+
     hpet_write(HPET_GEN_CONF, main_conf);
     return 0;
+}
+
+void hpet_udelay(uint64_t us)
+{
+    uint64_t start = hpet_read(HPET_MAIN_COUNTER);
+    uint64_t delta = (us * hpet_frequency_hz) / 1000000ULL;
+
+    while ((hpet_read(HPET_MAIN_COUNTER) - start) < delta)
+        __asm__ __volatile__("pause");
 }

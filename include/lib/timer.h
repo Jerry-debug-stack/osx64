@@ -28,6 +28,7 @@ typedef struct timer
 
 // local_timer_timeout的返回取值约定：位标志
 void mdelay(uint64_t ms);
+void hpet_udelay(uint64_t us);
 
 extern atomic_64_t unix_time;
 static inline uint64_t get_time(void){

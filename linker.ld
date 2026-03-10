@@ -23,8 +23,6 @@ SECTIONS
     .ap_code : {
         ap_code_data_start = .;
         target/boot.o(.apboot16)
-    }
-    .apdata : ALIGN(32){
         target/boot.o(.apdata)
     }
     . = VIRTUAL_BASE;

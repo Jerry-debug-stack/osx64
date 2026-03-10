@@ -608,19 +608,8 @@ section .apboot16
         mov fs,ax
         mov gs,ax
         mov ss,ax
-        mov sp,0x1000
-        in  al,0x92
-        or  al,2
-        out 0x92,al
-        mov edi,gdtr_addr
-        sub edi,ap_enter
-        add edi,0x10000
-        mov eax,gdt0
-        sub eax,ap_enter
-        add eax,0x10000
-        mov dword[edi],eax
-        sub edi,2
-        lgdt [edi]
+        mov sp,0x9000
+        lgdt [cs:gdtr_size - ap_enter]
         mov	eax,cr0
 	    or eax,1
 	    mov	cr0,eax
@@ -631,5 +620,5 @@ section .apdata
     gdt0:dd 0,0
     gdt_cs:dd 0xffff,FLAGS_32BIT|FLAGS_4KB|ACCESS_ACCESSED|ACCESS_CODE|ACCESS_CODE_DATA|ACCESS_CODE_READABLE|ACCESS_PRESENT|ACCESS_EXACT|(0xF<<16)
     gdt_ds:dd 0xffff,FLAGS_32BIT|FLAGS_4KB|ACCESS_ACCESSED|ACCESS_DATA|ACCESS_CODE_DATA|ACCESS_DATA_WRITABLE|ACCESS_DIRECTION_UP|ACCESS_PRESENT|(0XF<<16)
-    gdtr_size:dw 31
-    gdtr_addr:dd 0
+    gdtr_size:dw 23
+    gdtr_addr:dd gdt0

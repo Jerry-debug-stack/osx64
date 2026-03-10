@@ -127,6 +127,9 @@
     - [x] uuid
         - [x] read and write for user
     - [x] hex editor
+- [ ] run on hardware
+    - [ ] bug fix
+        - [x] 1
 
 就是这样了，上面的内容应该会逐步完成(一边做一边写)  
 ***
