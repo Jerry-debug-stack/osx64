@@ -2,9 +2,10 @@
 #define OS_MM_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type);
-void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type);
+void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type, uint64_t usr_define);
 int exist_page_4k(uint64_t vir_addr, uint64_t ptable_vir);
 void rm_page_4k(uint64_t vir_addr, uint64_t ptable_vir);
 void put_page_2M(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir);
@@ -21,5 +22,8 @@ void free_n_pages_4k(uint32_t n, uint64_t addr);
 
 void* kmalloc(uint32_t size);
 void kfree(void* vir_addr);
+
+uint64_t io_remap(uint64_t phy_addr, size_t size);
+void io_unmap(uint64_t vir_addr, size_t size);
 
 #endif

@@ -27,7 +27,7 @@ void init_slab(void)
         mm.nfslabi[i] = 0;
         uint64_t phy_page = alloc_page_4k();
         SLAB *slab = (void *)(SLAB_START_32 + (i << 39));
-        __put_page_4k_locked(phy_page, (uint64_t)slab, (uint64_t)vir_ptable4, 0);
+        __put_page_4k_locked(phy_page, (uint64_t)slab, (uint64_t)vir_ptable4, 0, 0);
         memset(slab, 0, 4096);
         slab->bitmap[0] = 1;
         slab->totalfree = slab_info[i].emptynum;
@@ -42,7 +42,7 @@ void init_slab(void)
         for (uint32_t j = 0; j < (uint32_t)64 << i; j++)
         {
             uint64_t phy_addr = alloc_page_4k();
-            __put_page_4k_locked(phy_addr, slab_info[i + 5].area_start_addr + (j << 12), (uint64_t)vir_ptable4, 0);
+            __put_page_4k_locked(phy_addr, slab_info[i + 5].area_start_addr + (j << 12), (uint64_t)vir_ptable4, 0, 0);
         }
     }
     spin_lock_init(&mm.lock);
@@ -88,7 +88,7 @@ void *slab_alloc(uint32_t size)
                 mm.slabei[i]++;
                 mm.nfslabi[i] = mm.slabei[i];
                 SLAB *newslab = (void *)(slab_info[i].area_start_addr + (mm.slabei[i] << 12));
-                __put_page_4k_locked(phy_page, (uint64_t)newslab, (uint64_t)vir_ptable4, 0);
+                __put_page_4k_locked(phy_page, (uint64_t)newslab, (uint64_t)vir_ptable4, 0, 0);
                 memset(newslab, 0, 4096);
                 newslab->bitmap[0] = 1;
                 newslab->totalfree = slab_info[i].emptynum;
@@ -144,7 +144,7 @@ void *slab_alloc(uint32_t size)
                 for (uint32_t j = 0; j < info->size >> 4; j++)
                 {
                     uint64_t phy_addr = alloc_page_4k();
-                    __put_page_4k_locked(phy_addr, info->area_start_addr + (current->id << (18 + i)) + (j << 12), (uint64_t)vir_ptable4, 0);
+                    __put_page_4k_locked(phy_addr, info->area_start_addr + (current->id << (18 + i)) + (j << 12), (uint64_t)vir_ptable4, 0, 0);
                 }
                 return (void*)addr;
             }

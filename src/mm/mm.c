@@ -213,8 +213,8 @@ uint8_t add_reference_page_4k(uint64_t addr)
     }
 }
 
-/// @param type: 0 for kernel 1 for user4k other for user4k protected
-void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type)
+/// @param type: 0 for kernel 1 for user4k other for out difined
+void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type, uint64_t usr_define)
 {
     if (vir_addr & 0xfff) {
         halt();
@@ -224,12 +224,15 @@ void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_
     if (type == 0) {
         item_type = PAGE_KERNEL_4K;
         dir_type = PAGE_KERNEL_DIR;
-    } else {
+    } else if (type == 1) {
         dir_type = PAGE_USER_DIR;
-        if (type == 1)
-            item_type = PAGE_USER_4K;
-        else
-            item_type = PAGE_USER_4K_COPY_ON_WRITE;
+        item_type = PAGE_USER_4K;
+    } else if (type == 2){
+        dir_type = PAGE_USER_DIR;
+        item_type = PAGE_USER_4K_COPY_ON_WRITE;
+    } else{
+        item_type = (uint16_t)usr_define;
+        dir_type = PAGE_KERNEL_DIR;
     }
     uint64_t* ptable = (void*)ptable_vir;
     uint32_t layer[4];
@@ -262,7 +265,7 @@ void __put_page_4k_locked(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_
 
 void put_page_4k(uint64_t phy_addr, uint64_t vir_addr, uint64_t ptable_vir, uint8_t type){
     spin_lock(&mm.lock);
-    __put_page_4k_locked(phy_addr,vir_addr,ptable_vir,type);
+    __put_page_4k_locked(phy_addr,vir_addr,ptable_vir,type,0);
     spin_unlock(&mm.lock);
 }
 
@@ -489,4 +492,60 @@ int copy_to_user(void *dest,void *source,uint32_t length){
 int put_user(char num,char *buf){
     *buf = num;
     return 0;
+}
+
+#include <stdbool.h>
+
+uint64_t io_remap(uint64_t phy_addr, size_t size){
+    uint64_t offset = phy_addr & 0xfff;
+    uint64_t aligned_start = phy_addr & (~0xffful);
+    spin_lock(&mm.lock);
+    size_t page_num = (size + offset + 4095) / 4096;
+    size_t free_page_num = 0;
+    uint64_t page = IO_REMAP_START;
+    uint64_t start_page = page;
+    bool found = false;
+    while(page < IO_REMAP_END){
+        if (!exist_page_4k(page,(uint64_t)vir_ptable4)){
+            if (!free_page_num){
+                start_page = page;
+            }
+            free_page_num++;
+            if (free_page_num == page_num){
+                found = true;
+                for (size_t i = 0;i < page_num;i++){
+                    __put_page_4k_locked(aligned_start + i * 4096,
+                        start_page + i * 4096,
+                        (uint64_t)vir_ptable4,
+                        3,
+                        PAGE_PRESENT | PAGE_GLOBAL | PAGE_WRITE_THROUGH | PAGE_LEVEL_CACHE_DISABLE | PAGE_SYSTEM_MODE
+                    );
+                    asm volatile("invlpg (%0)" : : "r"(start_page + i * 4096) : "memory");
+                }
+                break;
+            }
+        } else {
+            found = false;
+            free_page_num = 0;
+        }
+        page += 4096;
+    }
+    spin_unlock(&mm.lock);
+    if (found){
+        return start_page + offset;
+    } else {
+        return 0;
+    }
+}
+
+void io_unmap(uint64_t vir_addr, size_t size){
+    uint64_t offset = vir_addr & 0xfff;
+    uint64_t aligned_start = vir_addr & (~0xffful);
+    size_t page_num = (size + offset + 4095) / 4096;
+    spin_lock(&mm.lock);
+    for(size_t i = 0;i < page_num;i++){
+        rm_page_4k(aligned_start + i * 4096,(uint64_t)vir_ptable4);
+        asm volatile("invlpg (%0)" : : "r"(aligned_start + i * 4096) : "memory");
+    }
+    spin_unlock(&mm.lock);
 }

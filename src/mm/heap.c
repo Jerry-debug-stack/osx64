@@ -61,7 +61,7 @@ uint64_t heap_alloc(uint32_t size)
             if (ret + aligned_size > mm.he) {
                 for (uint64_t addr = mm.he; addr < ret + aligned_size; addr += 4096) {
                     uint64_t phy_addr = alloc_page_4k();
-                    __put_page_4k_locked(phy_addr, addr, (uint64_t)vir_ptable4, 0);
+                    __put_page_4k_locked(phy_addr, addr, (uint64_t)vir_ptable4, 0, 0);
                 }
                 mm.he = ret + aligned_size;
             }

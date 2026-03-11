@@ -25,9 +25,9 @@ elf64_header_t* elf_file_executable(int fd)
     if (header->elf_machine != ELF_MACHINE_X86_64)
         goto fail;
     elf64_part_header_t* p_header_tbl = kmalloc(sizeof(elf64_part_header_t) * header->elf_part_header_num);
-    memset(p_header_tbl,0,sizeof(elf64_header_t));
+    memset(p_header_tbl,0,sizeof(elf64_header_t) * header->elf_part_header_num);
     sys_lseek(fd,header->elf_part_header_offset,SEEK_SET);
-    sys_read(fd,(void*)p_header_tbl,sizeof(elf64_header_t));
+    sys_read(fd,(void*)p_header_tbl,sizeof(elf64_header_t) * header->elf_part_header_num);
     for (int i = 0; i < header->elf_part_header_num; i++) {
         if (p_header_tbl[i].part_vaddr >= VIRTUAL_ADDR_USER_ELF_HIGHEST)
             goto fail1;

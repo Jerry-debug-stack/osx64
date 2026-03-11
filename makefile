@@ -89,24 +89,28 @@ run:
 	make all
 	qemu-system-x86_64 -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0 \
 	-drive file=extended.img,if=none,id=disk1,format=raw -device ide-hd,drive=disk1,bus=ahci.1 \
-	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0
+	-device usb-ehci,id=ehci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=ehci.0
+#	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0
 
 rerun:
 	qemu-system-x86_64 -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0 \
 	-drive file=extended.img,if=none,id=disk1,format=raw -device ide-hd,drive=disk1,bus=ahci.1 \
-	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0 \
+	-device usb-ehci,id=ehci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=ehci.0
+#	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0 \
 
 usb_rerun:
 	qemu-system-x86_64 -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0 \
 	-drive file=usb_extended.img,if=none,id=disk1,format=raw -device ide-hd,drive=disk1,bus=ahci.1 \
-	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0 \
+	-device usb-ehci,id=ehci -drive if=none,id=myusb,file=extended.img,format=raw -device usb-storage,drive=myusb,bus=ehci.0
+#	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0 \
 
 test:
 	make clean
 	make all
 	qemu-system-x86_64 -s -S -smp 4 -m 4096 -vga std -device ahci,id=ahci -drive file=$(img),if=none,id=disk0,format=raw -device ide-hd,drive=disk0,bus=ahci.0 \
 	-drive file=extended.img,if=none,id=disk1,format=raw -device ide-hd,drive=disk1,bus=ahci.1 \
-	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0
+	-device usb-ehci,id=ehci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=ehci.0
+#	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0
 
 .PHONY: run all clean test rerun
 

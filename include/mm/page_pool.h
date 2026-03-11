@@ -9,7 +9,7 @@
 #define ADDRESS_SPACE_GAP MAX_MEM_SUPPORTED
 
 /// 我们假定arena的单个区域不会超过512G也就是一个Buffer
-#define NUMBER_OF_OTHER_IN_PML4 (7 + 1)
+#define NUMBER_OF_OTHER_IN_PML4 (7 + 2)
 #define SLAB_START_ID_IN_PML4 (256 + 2)
 
 typedef struct PhysicAreaItem {

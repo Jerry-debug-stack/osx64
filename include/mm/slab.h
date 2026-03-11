@@ -15,6 +15,9 @@
 #define HEAP_ADDR_START (SLAB_START_2048 + (1UL << 39))
 #define HEAP_SIZE_MAX (1UL << 39)
 
+#define IO_REMAP_START (HEAP_ADDR_START + HEAP_SIZE_MAX)
+#define IO_REMAP_END   (IO_REMAP_START + HEAP_SIZE_MAX)
+
 typedef struct SLab {
     uint8_t nextfree;
     uint8_t totalfree;
