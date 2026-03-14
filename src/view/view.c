@@ -15,6 +15,8 @@
     #define SCREEN_HEIGHT 720
 #endif
 
+//#define SCREEN_MOVEUP
+
 #define CHAR_X 8
 #define CHAR_Y 16
 #define MAX_ROWS (SCREEN_HEIGHT / CHAR_Y)
@@ -87,8 +89,13 @@ static void next_line(screen_t *scr)
     scr->disp_c_x = 0;
     scr->disp_c_y++;
     if (scr->disp_c_y >= (SCREEN_HEIGHT / CHAR_Y)) {
+        #ifdef SCREEN_MOVEUP
         set_position(scr, 0, (SCREEN_HEIGHT / CHAR_Y) - 1);
         screen_moveup(scr);
+        #else
+        set_position(scr, 0, 0);
+        screen_clear(scr, VIEW_COLOR_BLACK);
+        #endif
     } else {
         scr->disp_position = scr->disp_c_y * ROW_SIZE_INTS;
     }

@@ -8,6 +8,7 @@
 #include "task.h"
 #include "lib/timer.h"
 #include "fs/block.h"
+#include "view/view.h"
 
 extern uint64_t *vir_ptable4;
 
@@ -46,7 +47,7 @@ static struct uhci_controller *uhci_alloc_controller(uint8_t bus, uint8_t dev, u
     hc->io_base = (uint16_t)(bar & ~3);
     // 启用总线主控
     uint16_t cmd = read_pcie(MAKE_PCIE_ADDR_1(addr, 0, STATUS_COMMAND));
-    cmd |= PCI_CMD_BUS_MASTER;
+    cmd |= PCI_CMD_BUS_MASTER | PCI_CMD_IO_SPACE;
     write_pcie(MAKE_PCIE_ADDR_1(addr, 0, STATUS_COMMAND), cmd);
     return hc;
 }
@@ -81,9 +82,9 @@ static int uhci_hw_init(struct uhci_controller *hc) {
     io_outword(io + UHCI_USBCMD, CMD_HCRESET);
     
     // 等待复位完成
-    timeout = 10000;
+    timeout = 10;
     while ((io_inword(io + UHCI_USBCMD) & CMD_HCRESET) && timeout--) {
-        for (int i = 0; i < 100; i++) io_delay();
+        mdelay(1);
     }
     if (timeout <= 0) {
         return -1;
@@ -105,22 +106,22 @@ static int uhci_hw_init(struct uhci_controller *hc) {
         kfree(hc->frame_list);
         return -1;
     }
-
     // 初始化空闲 TD（不活动）
     memset(hc->idle_td, 0, sizeof(struct uhci_td));
     hc->idle_td->link = UHCI_PTR_TERM;               // 终止
+    clflush(hc->idle_td);
     // ctrl_status 为 0，Active 位为 0，不会执行传输
-
     // 初始化全局 QH
     memset(hc->global_qh, 0, sizeof(struct uhci_qh));
     hc->global_qh->horiz_link = UHCI_PTR_TERM;       // 水平链表终止
+    clflush(hc->global_qh);
     hc->idle_td_phy = hc->global_qh->vert_link   = (uint32_t)mem_linear2phy_get((uint64_t)hc->idle_td,(uint64_t)vir_ptable4); // 指向空闲 TD（不加 Q 位）
-
     // 将所有帧列表项指向 global_qh（带 Q 位）
     uint32_t qh_phys = (uint32_t)mem_linear2phy_get((uint64_t)hc->global_qh,(uint64_t)vir_ptable4) | UHCI_PTR_QH;
     for (int i = 0; i < UHCI_FRAMES; i++) {
         hc->frame_list->link[i] = qh_phys;
     }
+    clflush_range(hc->frame_list,4096);
     // === 新增结束 ===
 
     // 设置帧列表基址
@@ -161,7 +162,7 @@ static struct usb_device *uhci_enumerate_device(struct uhci_controller *hc, int 
 
     // 1. 确保端口已使能
     uhci_port_init(hc->io_base,port);
-
+    wb_printf("get descriptor\n");
     // 2. 获取设备描述符前8字节（得到最大包长）
     setup[0] = 0x80; // 方向 IN，设备到主机
     setup[1] = USB_REQ_GET_DESCRIPTOR;
@@ -186,7 +187,7 @@ static struct usb_device *uhci_enumerate_device(struct uhci_controller *hc, int 
     dev->port = port;
     dev->max_packet_size = max_packet_size;
     dev->speed = 0; // 全速（简化）
-
+    wb_printf("set new addr\n");
     // 4. 分配新地址
     dev->address = hc->next_addr++;
     setup[0] = 0x00; // 方向 OUT，主机到设备
@@ -356,8 +357,7 @@ int init_uhci_controller(uint8_t bus, uint8_t dev, uint8_t func) {
         kfree(hc);
         return -1;
     }
-
-    list_add_tail(&uhci_controllers, &hc->uhci_controller_list);
+    list_add_tail(&hc->uhci_controller_list,&uhci_controllers);
     return 0;
 }
 
@@ -387,9 +387,11 @@ static void uhci_register_block_device(struct usb_device *udev)
 
 void uhci_initial_scan(void) {
     struct uhci_controller *hc;
+    wb_printf("[  UHCI ] initial scan\n total controller num:%d\n",list_len(&uhci_controllers));
     list_for_each_entry(hc, &uhci_controllers, uhci_controller_list) {
         for (int port = 0; port < hc->port_num; port++) {
             if (uhci_port_has_device(hc, port)) {
+                wb_printf("[  UHCI ] found device on port %d\n",port);
                 // 枚举该端口上的设备
                 struct usb_device *dev = uhci_enumerate_device(hc, port);
                 if (dev) {
@@ -605,7 +607,7 @@ static int uhci_build_request(uhci_request_t *req) {
             td_data->link = UHCI_PTR_TERM;
             uint8_t pid = req->control.dir ? 0x69 : 0xE1; // IN or OUT
             td_data->ctrl_status = TD_CTL_NORMAL_CTRL_USE;
-            td_data->packed_header = TD_PH(len + 1,1,0,pid,dev_addr);
+            td_data->packed_header = TD_PH(len,1,0,pid,dev_addr);
             td_data->buffer = (uint32_t)mem_linear2phy_get((uint64_t)req->control.data,(uint64_t)vir_ptable4);
             td_setup->link = (uint32_t)(uintptr_t)easy_linear2phy(td_data);
         }
@@ -628,6 +630,11 @@ static int uhci_build_request(uhci_request_t *req) {
         } else {
             td_setup->link = (uint32_t)(uintptr_t)easy_linear2phy(td_status);
         }
+
+        clflush(td_setup);
+        clflush(td_status);
+        clflush_range(req->control.data,req->control.data_len);
+        clflush_range(req->control.setup,8);
 
         req->td_head = td_setup;
         req->last_td = td_status;
@@ -679,6 +686,7 @@ static int uhci_build_request(uhci_request_t *req) {
             td_data->packed_header = TD_PH(chunk,toggle,bulk_ep,pid,dev_addr);
             uint64_t data_va = (uint64_t)req->bulk.buffer + (data_len - remaining);
             td_data->buffer = (uint32_t)mem_linear2phy_get(data_va, req->bulk.cr3);
+            clflush_range(easy_phy2linear(td_data->buffer),chunk);
             prev_td->link = (uint32_t)(uintptr_t)easy_linear2phy(td_data);
             
             prev_td = td_data;
@@ -694,12 +702,29 @@ static int uhci_build_request(uhci_request_t *req) {
         td_csw->buffer = (uint32_t)mem_linear2phy_get((uint64_t)req->bulk.csw,(uint64_t)vir_ptable4);
         prev_td->link = (uint32_t)(uintptr_t)easy_linear2phy(td_csw);
         
+        clflush_range(td_cbw, req->page_num << 12);
+        clflush_range(req->bulk.cbw,32);
+
         // 设置请求的 TD 头和尾
         req->td_head = td_cbw;
         req->last_td = td_csw;
         return 0;
     }
     return -1;
+}
+
+// 添加状态打印函数
+UNUSED static void uhci_dump_controller_status(struct uhci_controller *hc) {
+    uint16_t usbcmd = io_inword(hc->io_base + UHCI_USBCMD);
+    uint16_t usbsts = io_inword(hc->io_base + UHCI_USBSTS);
+    uint16_t frnum  = io_inword(hc->io_base + UHCI_FRNUM);
+    wb_printf("[UHCI] CMD=0x%x STS=0x%x FRNUM=%d\n", usbcmd, usbsts, frnum);
+    if (usbsts & STS_HCHALTED) wb_printf("  HALTED");
+    if (usbsts & STS_USBERR)   wb_printf("  USBERR");
+    if (usbsts & STS_RD)        wb_printf("  RD");
+    if (usbsts & STS_HSE)       wb_printf("  HSE");
+    if (usbsts & STS_IOC)       wb_printf("  IOC");
+    wb_printf("\n");
 }
 
 void uhci_kernel_thread(void) {
@@ -725,6 +750,7 @@ void uhci_kernel_thread(void) {
 
                     hc->active_req = NULL;
                     hc->global_qh->vert_link = hc->idle_td_phy;
+                    clflush(hc->global_qh);
                     uhci_destroy_request(req);
                     wake_up_all(&req->wq);
                 }
@@ -741,6 +767,7 @@ void uhci_kernel_thread(void) {
                 if (uhci_build_request(req) == 0) {
                     uint32_t td_head_phys = (uint32_t)(uintptr_t)easy_linear2phy(req->td_head);
                     hc->global_qh->vert_link = td_head_phys & ~0xF;  // 确保低4位清零
+                    clflush(hc->global_qh);
                     hc->active_req = req;               // 设为活动请求
                 } else {
                     // 构建失败，直接结束请求

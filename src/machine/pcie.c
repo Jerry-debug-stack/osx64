@@ -3,6 +3,8 @@
 #include "view/view.h"
 #include "lib/string.h"
 #include <stdint.h>
+#include "const.h"
+#include "lib/io.h"
 
 void *init_ahci_disk(int pcie_addr);
 int init_uhci_controller(uint8_t bus, uint8_t dev, uint8_t func);
@@ -28,6 +30,18 @@ static void pci_scan_function(uint8_t bus, uint8_t dev, uint8_t func)
 void enumerate_pcie_devices(void)
 {
     init_ahci_mem();
+
+    uint32_t lpc_addr = MAKE_PCIE_ADDR(0, 0x1F, 0, 0);
+    uint32_t pmbase = read_pcie(lpc_addr + 0x40) & 0xFF80; // 获取 PMBASE
+    if (pmbase) {
+        // 读取 SMI_EN
+        uint32_t smi_en = io_indword(pmbase + 0x30);
+        // 禁用 USB Legacy SMI
+        smi_en &= ~((1 << 3) | (1 << 17)); // 关闭 LEGACY_USB_EN 和 LEGACY_USB2_EN
+        io_outdword(pmbase + 0x30, smi_en);
+        // 清除挂起的 USB SMI 状态（如果有）
+        io_outdword(pmbase + 0x34, (1 << 3) | (1 << 17));
+    }
 
     for (uint16_t bus = 0; bus < 256; bus++)
     {

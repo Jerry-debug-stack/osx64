@@ -60,8 +60,12 @@
 #define CMD_CF           0x0040  // 配置标志 (设置为 1)
 
 // USBSTS 状态寄存器位
-#define STS_HCHALTED     0x0020  // 主机控制器停止
-#define STS_USBINT       0x0001  // USB 中断 (轮询可不处理)
+#define STS_IOC         (1 << 0)   // Interrupt on Completion
+#define STS_HCPE        (1 << 1)   // Host Controller Process Error
+#define STS_HSE         (1 << 2)   // Host System Error
+#define STS_RD          (1 << 3)   // Resume Detect
+#define STS_USBERR      (1 << 4)   // USB Error Interrupt (Error Interrupt)
+#define STS_HCHALTED    (1 << 5)   // 主机控制器停止
 
 // PORTSC 端口寄存器位
 #define PORT_CCS         0x0001  // 当前连接状态
@@ -113,7 +117,7 @@
 
 typedef struct uhci_frame_list {
     uint32_t link[UHCI_FRAMES];  // 每个指针指向 TD 或 QH
-} __attribute__((aligned(4096))) uhci_frame_list_t;
+} __attribute__((packed)) uhci_frame_list_t;
 
 typedef struct uhci_td {
     uint32_t link;
@@ -121,13 +125,13 @@ typedef struct uhci_td {
     uint32_t packed_header;
     uint32_t buffer;
     volatile uint32_t rsvd[4];
-} __attribute__((aligned(16), packed)) uhci_td_t;
+} __attribute__((packed)) uhci_td_t;
 
 typedef struct uhci_qh {
     uint32_t horiz_link;    // 水平链接指针
     uint32_t vert_link;     // 垂直链接指针（指向第一个 TD）
     uint32_t pad[2];        // 保留（必须为 0）
-} __attribute__((aligned(16), packed)) uhci_qh_t;
+} __attribute__((packed)) uhci_qh_t;
 
 typedef struct uhci_controller {
     list_head_t uhci_controller_list;

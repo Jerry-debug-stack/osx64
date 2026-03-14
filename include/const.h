@@ -2,8 +2,7 @@
 #define OS_CONST_H
 #include <stdint.h>
 
-// #define CLOCK_FREQ      5000
-#define CLOCK_FREQ      500
+#define CLOCK_FREQ      5000
 #define DEFUALT_TICKS   10
 #define RELOAD_TICKS (1193182 / CLOCK_FREQ)
 

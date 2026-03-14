@@ -95,7 +95,7 @@ typedef struct ehci_qtd {
     uint32_t alt_next_qtd;      // 交替下一 qTD 指针（用于错误重试）
     uint32_t token;             // 令牌（包含状态、数据长度、PID、端点等）
     uint32_t buffer[5];         // 缓冲区指针数组（每个指针指向一个物理页，最多 5 页）
-} __attribute__((aligned(32), packed)) ehci_qtd_t;
+} __attribute__((packed)) ehci_qtd_t;
 
 // qTD 令牌（token）字段的位定义
 #define EHCI_QTD_STATUS_MASK    0xFF        // 状态字节（低 8 位）
@@ -128,7 +128,7 @@ typedef struct ehci_qh {
     uint32_t current_qtd;
     uint32_t next_qtd;
     uint32_t alt_qtd;
-} __attribute__((aligned(64), packed)) ehci_qh_t;
+} __attribute__((packed)) ehci_qh_t;
 
 // 水平链接指针标志位（低 5 位）
 #define EHCI_PTR_MASK           0xFFFFFFE0   // 地址掩码（32 字节对齐）
@@ -205,10 +205,6 @@ typedef struct ehci_controller {
     // 异步列表
     struct ehci_qh *async_dummy_qh;      // 异步列表头 QH（循环链表）
     uint64_t async_dummy_qh_phy;
-
-    // 空闲 qTD（用于 QH 初始垂直链接）
-    struct ehci_qtd *idle_qtd;
-    uint64_t idle_qtd_phy;
 
     struct ehci_qh *default_control_qh;
     uint64_t default_control_qh_phy;

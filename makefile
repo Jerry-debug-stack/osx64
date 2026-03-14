@@ -112,5 +112,12 @@ test:
 	-device usb-ehci,id=ehci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=ehci.0
 #	-device piix3-usb-uhci,id=usb-uhci -drive if=none,id=myusb,file=usb_extended.img,format=raw -device usb-storage,drive=myusb,bus=usb-uhci.0
 
+copy:
+	make all
+	sudo mount /dev/sda1 /mnt
+	sudo cp target/kernel.elf /mnt/boot/kernel.elf
+	sudo umount /mnt
+	sync
+
 .PHONY: run all clean test rerun
 

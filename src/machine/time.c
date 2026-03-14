@@ -16,7 +16,7 @@ extern uint32_t get_logic_cpu_id(void);
 extern void schedule(void);
 extern int init_hpet_timer(void);
 
-static uint64_t ticks;
+static volatile uint64_t ticks;
 extern atomic_64_t unix_time;
 extern uint64_t hpet_base;
 

@@ -116,4 +116,29 @@ static inline void write_cr4(uint64_t val) {
     __asm__ volatile ("mov %0, %%cr4" : : "r" (val));
 }
 
+// 刷新单个缓存行 (通常是 64 字节)
+static inline void clflush(volatile void *p) {
+    __asm__ __volatile__("clflush (%0)" : : "r"(p) : "memory");
+}
+
+#include <stddef.h>
+
+// 刷新一段内存区域
+static inline void clflush_range(void *start, size_t size) {
+    if (!start) return;
+    
+    uintptr_t addr = (uintptr_t)start;
+    uintptr_t end = addr + size;
+    
+    // x86 缓存行通常是 64 字节，对齐到 64 字节边界开始刷新
+    addr &= ~(64 - 1);
+    
+    for (; addr < end; addr += 64) {
+        clflush((void *)addr);
+    }
+    
+    // 执行完 clflush 后，建议加一个 mfence 确保所有刷入操作完成
+    __asm__ __volatile__("mfence" : : : "memory");
+}
+
 #endif

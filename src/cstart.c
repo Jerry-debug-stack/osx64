@@ -79,8 +79,8 @@ void init(void){
     kernel_thread_link_init("uhci",uhci_kernel_thread,NULL);
     kernel_thread_link_init("ehci",ehci_kernel_thread,NULL);
     
-    uhci_initial_scan();
     ehci_initial_scan();
+    uhci_initial_scan();
 
     read_partitions();
     mount_root();

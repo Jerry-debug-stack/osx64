@@ -8,6 +8,7 @@
 #include "task.h"
 #include "lib/timer.h"
 #include "fs/block.h"
+#include "view/view.h"
 
 extern uint64_t *vir_ptable4;
 
@@ -22,6 +23,7 @@ static inline uint32_t ehci_read32(struct ehci_controller *hc, uint32_t reg) {
 }
 static inline void ehci_write32(struct ehci_controller *hc, uint32_t reg, uint32_t val) {
     *(volatile uint32_t *)(hc->reg_base + reg) = val;
+    (void)*(volatile uint32_t *)(hc->reg_base + reg);
 }
 
 static struct ehci_controller *ehci_alloc_controller(uint8_t bus, uint8_t dev, uint8_t func) {
@@ -88,14 +90,6 @@ static struct ehci_controller *ehci_alloc_controller(uint8_t bus, uint8_t dev, u
 
     hc->async_dummy_qh = (struct ehci_qh *)page;
     hc->async_dummy_qh_phy = page_phys;
-    hc->idle_qtd = (struct ehci_qtd *)(page + 64);
-    hc->idle_qtd_phy = page_phys + 64;
-
-    memset(hc->async_dummy_qh, 0, sizeof(struct ehci_qh));
-    memset(hc->idle_qtd, 0, sizeof(struct ehci_qtd));
-
-    hc->idle_qtd->next_qtd = EHCI_PTR_TERM;
-    hc->idle_qtd->token = 0;
 
     spin_lock_init(&hc->lock);
     INIT_LIST_HEAD(&hc->req_queue);
@@ -107,19 +101,53 @@ static struct ehci_controller *ehci_alloc_controller(uint8_t bus, uint8_t dev, u
     return hc;
 }
 
+#define USBLEGSUP_BIOS_OWNED   (1 << 16)   // BIOS 拥有信号量
+#define USBLEGSUP_HC_OWNED      (1 << 24)   // 主机控制器拥有信号量
+
+static int ehci_take_control_from_bios(uint8_t bus, uint8_t device, uint8_t func) {
+    uint32_t legsup;
+
+    legsup = read_pcie(MAKE_PCIE_ADDR(bus, device, func, 0x80));
+
+    if ((legsup & USBLEGSUP_HC_OWNED) && !(legsup & USBLEGSUP_BIOS_OWNED)) {
+    out:
+        write_pcie(MAKE_PCIE_ADDR(bus, device, func, 0x84), 0xFFFFFFFF);
+        write_pcie(MAKE_PCIE_ADDR(bus, device, func, 0x84), 0);
+        return 0;
+    }
+
+    legsup |= USBLEGSUP_HC_OWNED;
+    write_pcie(MAKE_PCIE_ADDR(bus, device, func, 0x80), legsup);
+
+    while (1) {
+        legsup = read_pcie(MAKE_PCIE_ADDR(bus, device, func, 0x80));
+        if (!(legsup & USBLEGSUP_BIOS_OWNED)) {
+            goto out;
+        }
+    }
+}
+
 static int ehci_hw_init(struct ehci_controller *hc) {
-    volatile uint32_t *op_base = (void *)(hc->reg_base + hc->cap_length);  // 操作寄存器基址
+    uint32_t op_base = hc->cap_length;  // 操作寄存器基址
     uint32_t cmd;
     int timeout;
 
-    // 1. 复位主机控制器
-    cmd = op_base[EHCI_USBCMD / 4];
-    cmd |= EHCI_CMD_HCRESET;
-    op_base[EHCI_USBCMD / 4] = cmd;
+    ehci_take_control_from_bios(hc->bus,hc->dev,hc->func);
+    /* 关中断 */
+    ehci_write32(hc, op_base + EHCI_USBINTR, 0);
+    ehci_write32(hc, op_base + EHCI_USBSTS, 0xFFFFFFFF);
 
+    ehci_write32(hc, op_base + EHCI_CONFIGFLAG, 0);
+    mdelay(1);
+
+    // 1. 复位主机控制器
+    cmd = ehci_read32(hc,op_base + EHCI_USBCMD);
+    cmd |= EHCI_CMD_HCRESET;
+    cmd &= 0xf;
+    ehci_write32(hc,op_base + EHCI_USBCMD,cmd);
     // 等待复位完成（HCRESET 位自动清零）
     timeout = 10000;
-    while ((op_base[EHCI_USBCMD / 4] & EHCI_CMD_HCRESET) && timeout--) {
+    while ((ehci_read32(hc,op_base + EHCI_USBCMD) & EHCI_CMD_HCRESET) && timeout--) {
         mdelay(1);
     }
     if (timeout <= 0) {
@@ -130,29 +158,29 @@ static int ehci_hw_init(struct ehci_controller *hc) {
     // 复位后需要延迟（规范建议至少 10ms）
     mdelay(10);
 
-    memset(hc->async_dummy_qh, 0, 96);
+    ehci_write32(hc, hc->cap_length + EHCI_CTRLDSSEGMENT, 0);
+
+    memset(hc->async_dummy_qh, 0, 64);
     hc->async_dummy_qh->horiz_link = hc->async_dummy_qh_phy | EHCI_PTR_TYPE_QH;
-    // 垂直链接：指向空闲 qTD（不活跃的 qTD）
-    hc->async_dummy_qh->alt_qtd = hc->async_dummy_qh->current_qtd = EHCI_PTR_TERM;
+    hc->async_dummy_qh->next_qtd = hc->async_dummy_qh->alt_qtd = EHCI_PTR_TERM;
+    hc->async_dummy_qh->current_qtd = 0;
     hc->async_dummy_qh->ep_char = EHCI_EPCHAR_HEAD;
-    hc->async_dummy_qh->next_qtd = hc->idle_qtd_phy;
-    
-    hc->idle_qtd->next_qtd = EHCI_PTR_TERM;
-    hc->idle_qtd->alt_next_qtd = EHCI_PTR_TERM;
-    hc->idle_qtd->token = 0;
+    clflush(hc->async_dummy_qh);
 
-    op_base[EHCI_ASYNCLISTADDR / 4] = hc->async_dummy_qh_phy;
+    ehci_write32(hc,op_base + EHCI_ASYNCLISTADDR,hc->async_dummy_qh_phy);
 
-    op_base[EHCI_CONFIGFLAG / 4] = EHCI_CFG_FLAG;
-
-    cmd = op_base[EHCI_USBCMD / 4];
+    cmd = ehci_read32(hc,op_base + EHCI_USBCMD);
     cmd |= EHCI_CMD_RUN | EHCI_CMD_ASE;
     cmd &= ~EHCI_CMD_PSE;
     cmd &= ~EHCI_CMD_INT_THRESH_MASK;
-    op_base[EHCI_USBCMD / 4] = cmd;
+    ehci_write32(hc,op_base + EHCI_USBCMD,cmd);
 
     timeout = 10000;
-    while ((op_base[EHCI_USBSTS / 4] & EHCI_STS_HALTED) && timeout--) {
+    while ((ehci_read32(hc,op_base + EHCI_USBSTS) & (EHCI_STS_HALTED | EHCI_STS_SYSERR)) && timeout--) {
+        uint32_t status = ehci_read32(hc,op_base + EHCI_USBSTS);
+        if (status & (EHCI_STS_HALTED | EHCI_STS_SYSERR)){
+            halt();
+        }
         mdelay(1);
     }
     if (timeout <= 0) {
@@ -160,11 +188,12 @@ static int ehci_hw_init(struct ehci_controller *hc) {
         return -1;
     }
 
+    ehci_write32(hc,op_base + EHCI_CONFIGFLAG,EHCI_CFG_FLAG);
     for (int i = 0; i < hc->port_num; i++) {
-        uint32_t portsc = op_base[EHCI_PORTSC / 4 + i];
+        uint32_t portsc = ehci_read32(hc,op_base + EHCI_PORTSC + i * 4);
         if (!(portsc & EHCI_PORTSC_PP)) {
             portsc |= EHCI_PORTSC_PP;
-            op_base[EHCI_PORTSC / 4 + i] = portsc;
+            ehci_write32(hc,op_base + EHCI_PORTSC + i * 4,portsc);
         }
     }
 
@@ -180,7 +209,7 @@ int init_ehci_controller(uint8_t bus, uint8_t dev, uint8_t func) {
         return -1;
     }
 
-    list_add_tail(&ehci_controllers, &hc->ehci_controller_list);
+    list_add_tail(&hc->ehci_controller_list,&ehci_controllers);
     return 0;
 }
 
@@ -193,43 +222,29 @@ static int ehci_port_reset(struct ehci_controller *hc, int port) {
     uint32_t portsc;
     int timeout;
 
-    // 1. 检查是否有设备连接
     portsc = ehci_read32(hc, portsc_addr);
     if (!(portsc & EHCI_PORTSC_CCS)) {
-        // 无设备连接
         return -1;
     }
 
-    // 2. 设置端口复位位
     portsc |= EHCI_PORTSC_PR;
     ehci_write32(hc, portsc_addr, portsc);
-
-    // 3. 等待至少 50ms（规范要求最少 10ms，但建议 50ms）
     mdelay(50);
-
-    // 4. 清除复位位（有些控制器会自动清零，但手动清除更安全）
-    portsc = ehci_read32(hc, portsc_addr);
     portsc &= ~EHCI_PORTSC_PR;
     ehci_write32(hc, portsc_addr, portsc);
 
-    // 5. 等待端口使能（PE）或直到复位完成（例如 CSC 置位）
-    //    规范中，复位完成后，端口应自动使能（对于高速设备）
-    timeout = 10000;  // 超时 10ms 左右（根据轮询粒度）
+    timeout = 10;
     while (timeout--) {
         portsc = ehci_read32(hc, portsc_addr);
         if (portsc & EHCI_PORTSC_PE) {
-            // 端口使能，成功
             return 0;
         }
-        // 如果连接状态改变，可能设备已断开
         if (portsc & EHCI_PORTSC_CSC) {
-            // 连接状态改变，设备可能已断开
             break;
         }
         mdelay(1);
     }
 
-    // 超时或设备断开
     return -1;
 }
 
@@ -254,11 +269,11 @@ struct ehci_qh *ehci_create_qh(struct ehci_controller *hc, uint8_t dev_addr,uint
 
     // ---- 设置 ep_char[1] ----
     // 假设设备直接连接在主控制器，无需分拆事务，所以全部清零
-    qh->ep_cap = 0;
+    qh->ep_cap = 1 << 30;
 
     // ---- 垂直链接：指向空闲 qTD ----
-    qh->next_qtd = hc->idle_qtd_phy;               // 初始无工作
-    qh->current_qtd = qh->alt_qtd = EHCI_PTR_TERM;
+    qh->next_qtd = qh->alt_qtd = EHCI_PTR_TERM;
+    qh->current_qtd = 0;
 
     // ---- 插入异步列表（在 dummy QH 之后） ----
     spin_lock(&hc->lock);   // 需要保护链表操作
@@ -266,10 +281,12 @@ struct ehci_qh *ehci_create_qh(struct ehci_controller *hc, uint8_t dev_addr,uint
 
     // 新 QH 的水平链接指向 dummy 原来指向的下一个 QH
     qh->horiz_link = dummy_qh->horiz_link;
+    
+    clflush(qh);
 
-    // 确保新 QH 的物理地址加上类型标志（QH 类型：低两位为 00）
-    uint32_t new_qh_phy = (uint32_t)page_phys;     // 物理地址在 32 位内
+    uint32_t new_qh_phy = (uint32_t)page_phys;
     dummy_qh->horiz_link = new_qh_phy | EHCI_PTR_TYPE_QH;
+    clflush(dummy_qh);
 
     spin_unlock(&hc->lock);
 
@@ -294,6 +311,7 @@ void ehci_destroy_qh(struct ehci_controller *hc, struct ehci_qh *qh) {
         curr = (struct ehci_qh *)easy_phy2linear(next_phy);
         if (curr == qh) {
             prev->horiz_link = qh->horiz_link;
+            clflush(prev);
             break;
         }
 
@@ -366,6 +384,7 @@ static struct ehci_device *ehci_enumerate_device(struct ehci_controller *hc, int
     }
     mdelay(2);                              // 等待地址生效
 
+    wb_printf("create qh\n");
     // 5. 为设备创建控制端点 QH（使用新地址，端点0，最大包长）
     dev->qh_control = ehci_create_qh(hc, dev->address, 0, max_packet_size);
     if (!dev->qh_control) {
@@ -550,16 +569,15 @@ void ehci_initial_scan(void) {
         }
         uint64_t page_phys = (uint64_t)easy_linear2phy(page);
         struct ehci_qh *qh = (struct ehci_qh *)page;
-        memset(qh, 0, sizeof(struct ehci_qh));
+        memset(qh, 0, 64);
 
-        // 设置端点特性：设备地址 0，端点 0，高速，硬件管理 toggle，最大包长 8（暂定）
-        uint32_t max_packet = 8;
-        qh->ep_char = EHCI_EPCHAR_EPS_HIGH | EHCI_EPCHAR_DTC | (max_packet << 16);
-        qh->ep_cap = 0;
+        // 设置端点特性：设备地址 0，端点 0，高速，硬件管理 toggle，最大包长 64
+        uint32_t max_packet = 64;
+        qh->ep_char = EHCI_EPCHAR_EPS_HIGH | EHCI_EPCHAR_DTC | (4 << 28) | (max_packet << 16);
+        qh->ep_cap = 1 << 30;
 
-        // 垂直链接：指向空闲 qTD，确保无工作
-        qh->next_qtd = hc->idle_qtd_phy;
-        qh->current_qtd = qh->alt_qtd = EHCI_PTR_TERM;
+        qh->current_qtd = 0;
+        qh->next_qtd = qh->alt_qtd = EHCI_PTR_TERM;
         
         // 水平链接：插入到异步列表 dummy QH 之后
         struct ehci_qh *dummy_qh = hc->async_dummy_qh;
@@ -567,22 +585,20 @@ void ehci_initial_scan(void) {
         // 新 QH 指向 dummy 原本指向的下一个
         qh->horiz_link = dummy_qh->horiz_link;
         // dummy 指向新 QH
-        dummy_qh->horiz_link = page_phys | EHCI_PTR_TYPE_QH;   // 类型 QH（低两位为 00）
+        dummy_qh->horiz_link = page_phys | EHCI_PTR_TYPE_QH;
+
+        clflush(qh);
+        clflush(dummy_qh);
 
         // 保存到控制器结构
         hc->default_control_qh = qh;
         hc->default_control_qh_phy = page_phys;
-
-        __asm__ __volatile__("mfence");
-
         /* step 2: enumerate all devices on ports */
         uint32_t op_base = hc->cap_length;  // 操作寄存器偏移
         for (int port = 0; port < hc->port_num; port++) {
             uint32_t portsc = ehci_read32(hc, op_base + EHCI_PORTSC + port * 4);
             if (portsc & EHCI_PORTSC_CCS) {
                 __asm__ __volatile__("nop");
-                ehci_port_reset(hc, port);
-
                 // 枚举设备
                 struct ehci_device *dev = ehci_enumerate_device(hc, port);
                 if (dev) {
@@ -807,28 +823,29 @@ static int ehci_build_request(ehci_request_t *req) {
         qtd_status = (struct ehci_qtd *)(vir_mem + offset);
 
         // ---- 1. 设置阶段 qTD ----
-        memset(qtd_setup, 0, sizeof(struct ehci_qtd));
-        // 令牌：长度 8，IOC=0，toggle=0，PID=SETUP，错误计数=3
+        // 令牌：长度 8，toggle=0，PID=SETUP，错误计数=3
         qtd_setup->token = EHCI_BUILD_TOKEN(8, 0, 0, EHCI_PID_SETUP, 3);
         // 缓冲区：setup 包在 request 结构中的物理地址
         uint32_t setup_phy = (uint32_t)mem_linear2phy_get((uint64_t)req->control.setup, (uint64_t)vir_ptable4);
         qtd_setup->buffer[0] = setup_phy;
+        qtd_setup->buffer[1] = qtd_setup->buffer[2] = qtd_setup->buffer[3] = qtd_setup->buffer[4] = 0x100000;
         // 其余 buffer 保持 0
         // 链接：指向下一个 qTD（若有数据则指向 data，否则指向 status）
-        qtd_setup->next_qtd = (len > 0) ? (uint32_t)(phy_mem + 32) : (uint32_t)(phy_mem + offset);
+        qtd_setup->next_qtd = (len > 0) ? (uint32_t)(phy_mem + 32) : (uint32_t)(phy_mem + offset);//EHCI_PTR_TERM;//
+        qtd_setup->alt_next_qtd = EHCI_PTR_TERM;
 
+        uint32_t data_phy = 0;
         // ---- 2. 数据阶段 qTD（如果有） ----
         if (len > 0) {
-            memset(qtd_data, 0, sizeof(struct ehci_qtd));
             uint8_t pid = req->control.dir ? EHCI_PID_IN : EHCI_PID_OUT;
-            qtd_data->token = EHCI_BUILD_TOKEN(len, 0, 1, pid, 3); // toggle=1
-            uint32_t data_phy = (uint32_t)mem_linear2phy_get((uint64_t)req->control.data, (uint64_t)vir_ptable4);
+            qtd_data->token = EHCI_BUILD_TOKEN(len, 0, 1, pid, 3);
+            data_phy = (uint32_t)mem_linear2phy_get((uint64_t)req->control.data, (uint64_t)vir_ptable4);
             qtd_data->buffer[0] = data_phy;
+            qtd_data->buffer[1] = qtd_data->buffer[2] = qtd_data->buffer[3] = qtd_data->buffer[4] = 0x100000;
+            qtd_data->alt_next_qtd = EHCI_PTR_TERM;
             qtd_data->next_qtd = (uint32_t)(phy_mem + offset); // 指向 status
         }
-
-        // ---- 3. 状态阶段 qTD ----
-        memset(qtd_status, 0, sizeof(struct ehci_qtd));
+        // ---- 3. 状态阶段 qTD ----full descriptor
         uint8_t status_pid;
         if (len == 0) {
             // 无数据阶段，状态为 IN
@@ -837,16 +854,24 @@ static int ehci_build_request(ehci_request_t *req) {
             // 状态阶段方向与数据阶段相反
             status_pid = req->control.dir ? EHCI_PID_OUT : EHCI_PID_IN;
         }
-        qtd_status->token = EHCI_BUILD_TOKEN(0, 1, 1, status_pid, 3); // IOC=1
+        qtd_status->token = EHCI_BUILD_TOKEN(0, 0, 1, status_pid, 3);
         qtd_status->buffer[0] = 0;
         qtd_status->next_qtd = EHCI_PTR_TERM;   // 终止
+        qtd_status->alt_next_qtd = EHCI_PTR_TERM;
+        qtd_status->buffer[1] = qtd_status->buffer[2] = qtd_status->buffer[3] = qtd_status->buffer[4] = 0x100000;
 
         // ---- 记录请求信息 ----
-        req->qtd_head = qtd_setup;          // 虚拟地址
-        req->qtd_last = qtd_status;         // 虚拟地址
-        req->page_num = 1;                  // 占用一页
+        req->qtd_head = qtd_setup;
+        req->qtd_last = qtd_status;//qtd_setup;//
+        req->page_num = 1;
         req->qh = qh;
         req->qh_phy = qh_phy;
+
+        clflush(qtd_setup);
+        if (len > 0)
+            clflush(qtd_data);
+        clflush(qtd_status);
+        clflush(req->control.setup);
 
         return 0;
     }
@@ -883,7 +908,7 @@ static int ehci_build_request(ehci_request_t *req) {
         struct ehci_qtd *qtd_cbw = (struct ehci_qtd*)(vir_mem + offset);
         memset(qtd_cbw, 0, sizeof(struct ehci_qtd));
         qtd_cbw->next_qtd = qtd_cbw->alt_next_qtd = EHCI_PTR_TERM;
-        qtd_cbw->token = EHCI_BUILD_TOKEN(31, 0, 0, EHCI_PID_OUT, 3); // 长度31, 无IOC, toggle=0, OUT
+        qtd_cbw->token = EHCI_BUILD_TOKEN(31, 0, 0, EHCI_PID_OUT, 3); // 长度31, toggle=0, OUT
         qtd_cbw->buffer[0] = (uint32_t)mem_linear2phy_get((uint64_t)req->bulk.cbw, (uint64_t)vir_ptable4);
         req->bulk.phase_info[0].head = qtd_cbw;
         req->bulk.phase_info[0].last = qtd_cbw;
@@ -903,9 +928,10 @@ static int ehci_build_request(ehci_request_t *req) {
             int chunk = ((int)data_remaining > max_packet) ? max_packet : (int)data_remaining;
             struct ehci_qtd *qtd_data = (struct ehci_qtd*)(vir_mem + offset);
             memset(qtd_data, 0, sizeof(struct ehci_qtd));
-            qtd_data->token = EHCI_BUILD_TOKEN(chunk, 0, toggle, pid, 3); // 无 IOC
+            qtd_data->token = EHCI_BUILD_TOKEN(chunk, 0, toggle, pid, 3);
             // 当前数据块的物理地址（假设缓冲区在一个物理页内，若跨页需扩展 buffer[1..4]）
             uint64_t data_pa = mem_linear2phy_get(data_va, req->bulk.cr3);
+            clflush_range(easy_phy2linear(data_pa), chunk);
             qtd_data->buffer[0] = (uint32_t)data_pa;
             qtd_data->next_qtd = qtd_data->alt_next_qtd = EHCI_PTR_TERM;                    // 先设终止，后续链接
 
@@ -927,7 +953,7 @@ static int ehci_build_request(ehci_request_t *req) {
         struct ehci_qtd *qtd_csw = (struct ehci_qtd*)(vir_mem + offset);
         memset(qtd_csw, 0, sizeof(struct ehci_qtd));
         qtd_csw->next_qtd = qtd_csw->alt_next_qtd = EHCI_PTR_TERM;
-        qtd_csw->token = EHCI_BUILD_TOKEN(13, 1, toggle, EHCI_PID_IN, 3); // IOC=1，使用当前 toggle
+        qtd_csw->token = EHCI_BUILD_TOKEN(13, 0, toggle, EHCI_PID_IN, 3); // 使用当前 toggle
         qtd_csw->buffer[0] = (uint32_t)mem_linear2phy_get((uint64_t)req->bulk.csw, (uint64_t)vir_ptable4);
         req->bulk.phase_info[2].head = qtd_csw;
         req->bulk.phase_info[2].last = qtd_csw;
@@ -938,9 +964,44 @@ static int ehci_build_request(ehci_request_t *req) {
         // 初始化阶段为 0 (CBW)
         req->bulk.phase = 0;
         req->qtd_head = qtd_cbw;
+        clflush_range(qtd_cbw,req->page_num << 12);
+        clflush(req->bulk.cbw);
         return 0;
     }
     return -1;
+}
+
+// 假设你的 pcie_addr 包含了 bus, dev, func 信息
+UNUSED static void debug_print_pci_status(uint64_t pcie_addr) {
+    // 读取 Offset 0x04 (Command & Status)
+    uint32_t cmd_status = read_pcie(MAKE_PCIE_ADDR_1(pcie_addr, 0, 0x04));
+    
+    uint16_t command = cmd_status & 0xFFFF;
+    uint16_t status = (cmd_status >> 16) & 0xFFFF;
+
+    wb_printf("--- PCI Debug Info ---\n");
+    wb_printf("PCI Addr: %x, Cmd_Status Raw: %x\n", (uint32_t)pcie_addr, cmd_status);
+    
+    // 检查权限
+    wb_printf("Command: %x (BusMaster: %s, MemSpace: %s)\n", 
+              command, 
+              (command & 0x04) ? "ON" : "OFF", 
+              (command & 0x02) ? "ON" : "OFF");
+
+    // 检查 PCI 错误位 (Status Register)
+    wb_printf("Status: %x [", status);
+    if (status & (1 << 15)) wb_printf("Detected-Parity-Error ");
+    if (status & (1 << 14)) wb_printf("Signaled-System-Error ");
+    if (status & (1 << 13)) wb_printf("Received-Master-Abort ");
+    if (status & (1 << 12)) wb_printf("Received-Target-Abort ");
+    if (status & (1 << 11)) wb_printf("Signaled-Target-Abort ");
+    if (status & (1 << 8))  wb_printf("Master-Data-Parity ");
+    wb_printf("]\n");
+
+    // 额外检查：EHCI 特有的寄存器是否反映了 HSE
+    // 这里的 hc->reg_base 是你的 EHCI 映射地址
+    // uint32_t usbsts = ehci_read32(hc, EHCI_USBSTS);
+    // wb_printf("EHCI USBSTS: %x\n", usbsts);
 }
 
 void ehci_kernel_thread(void) {
@@ -951,7 +1012,6 @@ void ehci_kernel_thread(void) {
             if (hc->active_req) {
                 ehci_request_t *req = hc->active_req;
                 int complete = 0;
-
                 if (req->type == EHCI_REQ_CONTROL) {
                     // 控制传输：检查最后一个 qTD
                     struct ehci_qtd *last = req->qtd_last;
@@ -975,8 +1035,9 @@ void ehci_kernel_thread(void) {
                                 // 清除当前阶段的 QH
                                 struct ehci_qh *qh = req->bulk.phase_info[phase].qh;
                                 if (qh) {
-                                    qh->next_qtd = hc->idle_qtd_phy;
-                                    __asm__ __volatile__("mfence");
+                                    qh->current_qtd = 0;
+                                    qh->alt_qtd = qh->next_qtd = EHCI_PTR_TERM;
+                                    clflush(qh);
                                 }
                                 phase++;
                                 if (phase < 3) {
@@ -985,8 +1046,10 @@ void ehci_kernel_thread(void) {
                                     uint32_t next_head_phy = (uint32_t)mem_linear2phy_get((uint64_t)next_head, (uint64_t)vir_ptable4);
                                     struct ehci_qh *next_qh = req->bulk.phase_info[phase].qh;
                                     if (next_qh) {
+                                        next_qh->current_qtd = 0;
+                                        next_qh->alt_qtd = EHCI_PTR_TERM;
                                         next_qh->next_qtd = next_head_phy;
-                                        __asm__ __volatile__("mfence");
+                                        clflush(next_qh);
                                         req->bulk.phase = phase;
                                     } else {
                                         req->status = -1;
@@ -1008,15 +1071,20 @@ void ehci_kernel_thread(void) {
 
                     // 清理所有用过的 QH（使其指向空闲 qTD）
                     if (req->type == EHCI_REQ_CONTROL) {
-                        if (req->qh)
-                            req->qh->next_qtd = hc->idle_qtd_phy;
+                        if (req->qh){
+                            req->qh->alt_qtd = req->qh->next_qtd = EHCI_PTR_TERM;
+                            req->qh->current_qtd = 0;
+                            clflush(req->qh);
+                        }
                     } else {
                         for (int i = 0; i < 3; i++) {
-                            if (req->bulk.phase_info[i].qh)
-                                req->bulk.phase_info[i].qh->next_qtd = hc->idle_qtd_phy;
+                            if (req->bulk.phase_info[i].qh){
+                                req->bulk.phase_info[i].qh->alt_qtd = req->bulk.phase_info[i].qh->next_qtd = EHCI_PTR_TERM;
+                                req->bulk.phase_info[i].qh->current_qtd = 0;
+                                clflush(req->bulk.phase_info[i].qh);
+                            }
                         }
                     }
-                    __asm__ __volatile__("mfence");
 
                     // 释放请求占用的内存
                     free_n_pages_4k(req->page_num, (uint64_t)easy_linear2phy(req->qtd_head));
@@ -1032,10 +1100,12 @@ void ehci_kernel_thread(void) {
 
                 if (ehci_build_request(req) == 0) {
                     if (req->type == EHCI_REQ_CONTROL) {
-                        uint32_t qtd_head_phy = (uint32_t)mem_linear2phy_get((uint64_t)req->qtd_head, (uint64_t)vir_ptable4);
+                        uint32_t qtd_head_phy = (uint64_t)easy_linear2phy(req->qtd_head);
                         if (req->qh) {
+                            req->qh->alt_qtd = EHCI_PTR_TERM;
+                            req->qh->current_qtd = 0;
                             req->qh->next_qtd = qtd_head_phy;
-                            __asm__ __volatile__("mfence");
+                            clflush(req->qh);
                             hc->active_req = req;
                         } else {
                             goto fail;
@@ -1044,8 +1114,10 @@ void ehci_kernel_thread(void) {
                         // 启动第 0 阶段（CBW）
                         if (req->bulk.phase_info[0].qh && req->bulk.phase_info[0].head) {
                             uint32_t head_phy = (uint32_t)mem_linear2phy_get((uint64_t)req->bulk.phase_info[0].head, (uint64_t)vir_ptable4);
+                            req->bulk.phase_info[0].qh->alt_qtd = EHCI_PTR_TERM;
+                            req->bulk.phase_info[0].qh->current_qtd = 0;
                             req->bulk.phase_info[0].qh->next_qtd = head_phy;
-                            __asm__ __volatile__("mfence");
+                            clflush(req->bulk.phase_info[0].qh);
                             hc->active_req = req;
                         } else {
                             goto fail;
